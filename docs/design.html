@@ -92,7 +92,7 @@ td code, th code { white-space: nowrap; }
     <div class="eyebrow">cntxt-labs · design · v0 built · 2026-10-03</div>
     <h1>yojana: plans as checkable contracts</h1>
     <p class="lede">Plain Markdown plans backed by an append-only log of every requirement revision. It catches conflicting edits, checks claims against the code, and reads progress from beads.</p>
-    <div class="meta"><span>repo: yojana/</span><span>epic: yoj-9fe (closed)</span><span>191 tests</span><span>source: docs/design.md</span></div>
+    <div class="meta"><span>repo: yojana/</span><span>epic: yoj-9fe (closed)</span><span>204 tests</span><span>source: docs/design.md</span></div>
   </header>
 
   <section id="why">
@@ -257,15 +257,20 @@ yojana abandon &lt;change&gt; --reason &lt;text&gt;   close a change without app
 yojana refresh                            bring log changes into files that fell behind
 yojana status [plan] [--check]            the one view
 yojana check [plan] [--strict]            verify claims against the code
-yojana repair                             recover a corrupt log</code></pre>
+yojana repair                             recover a corrupt log
+yojana comment &lt;plan&gt; &lt;req&gt; "&lt;text&gt;"      note on a requirement (--quote, --reply)
+yojana review [plan] [--check]            HTML review page in .yojana/review/
+yojana import &lt;file&gt; --id &lt;plan-id&gt;       start a plan from an existing Markdown roadmap</code></pre>
     <p class="note">Every command takes <code>--json</code>, errors included. Exit codes: 0 done, 1 refused, violated, invalid or failed, 2 usage.</p>
   </section>
 
   <section id="next">
     <h2>Next <span class="anchor">#next</span></h2>
     <ul class="scope">
-      <li><span class="bead">yoj-04r</span><span>Import an existing Markdown roadmap as a plan</span></li>
-      <li><span class="bead">yoj-djd</span><span>HTML review page with comments anchored to requirement revisions</span></li>
+      <li><span class="bead">built</span><span><code>import</code>: anvesa's 225-line roadmap became the same 8 requirements and bead links as the hand conversion</span></li>
+      <li><span class="bead">built</span><span><code>comment</code> and <code>review</code>: a review page per plan, with comments marked outdated when their requirement changes</span></li>
+      <li><span class="bead">later</span><span>Commenting from inside the review page (needs a local writer such as <code>review --serve</code>)</span></li>
+      <li><span class="bead">later</span><span>OpenSpec import/export, git-ref and Dolt sync, a medha rule sink, a Claude Code plugin</span></li>
     </ul>
   </section>
 </main>
