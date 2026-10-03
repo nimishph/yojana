@@ -40,7 +40,7 @@ describe('parsePlan: the example plan', () => {
       "The plugin's MCP server starts through `npx` when `anvesa` is not on PATH.",
     );
     expect(first?.claims).toEqual([
-      { kind: 'wql', expression: '//file[@path=".claude-plugin/plugin.json"]', expect: true },
+      { kind: 'path', expression: '.claude-plugin/plugin.json', expect: true },
     ]);
     expect(parsed.requirements[1]?.claims[0]?.expect).toBe(false);
   });
