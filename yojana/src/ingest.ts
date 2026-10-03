@@ -44,6 +44,11 @@ export interface IngestOptions {
    * edited on top of the log instead of refusing.
    */
   readonly trustFile?: boolean | undefined;
+  /**
+   * Compare only: report what ingest would do and write nothing (no events, no bases). Outcome
+   * `recorded` then means "would record". Used by status.
+   */
+  readonly dryRun?: boolean | undefined;
 }
 
 export type Movement = 'same' | 'edited' | 'behind' | 'conflict';
@@ -216,13 +221,15 @@ export async function ingest(options: IngestOptions): Promise<IngestReport> {
       }
     }
 
-    for (const event of events) await store.append(event, actor);
-    appended += events.length;
-    await bases.set({
-      planId: plan.id,
-      status: status?.movement === 'behind' ? baseStatus : plan.status,
-      revisions: nextBase,
-    });
+    if (options.dryRun !== true) {
+      for (const event of events) await store.append(event, actor);
+      appended += events.length;
+      await bases.set({
+        planId: plan.id,
+        status: status?.movement === 'behind' ? baseStatus : plan.status,
+        revisions: nextBase,
+      });
+    }
 
     reports.push({
       source: file.source,
@@ -232,7 +239,7 @@ export async function ingest(options: IngestOptions): Promise<IngestReport> {
       requirements: outcomes,
       status,
       missingBase,
-      appended: events.length,
+      appended: options.dryRun === true ? 0 : events.length,
     });
   }
 

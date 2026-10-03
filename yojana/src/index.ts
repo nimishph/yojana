@@ -26,6 +26,13 @@ export {
 } from './ingest.ts';
 export { type ItemProgress, type PlanProgress, progress } from './progress.ts';
 export {
+  type FileState,
+  type OpenChange,
+  type PlanReport,
+  type StatusReport,
+  status,
+} from './status.ts';
+export {
   ensureGitAttributes,
   loadPlanFiles,
   openWorkspace,

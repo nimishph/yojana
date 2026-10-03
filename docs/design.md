@@ -136,6 +136,17 @@ for a plan the log already knows, differing requirements are refused unless `--t
 record the file on top of the log. A Claude Code PostToolUse hook on edits under `plans/` can run
 ingest automatically. The file can always be regenerated from the log.
 
+## Status
+
+`yojana status [plan] [--check]` shows, per plan: lifecycle status and since when; progress read
+from its beads (an epic counts its children, a missing bead counts as not done, an unreachable bd
+is reported, never shown as 0%); the plan file against the log, from a dry-run ingest (edits not
+ingested, requirements it is behind on, conflicts); contested requirements; open changes with
+their age (stale after `--stale-days`, default 14); and anomalies still needing attention. A merge
+collision is marked settled once resolved and drops out of status, staying in the log as history.
+`--check` adds the claim results. Plan files that do not parse, or name a plan the log does not
+know, are listed as untracked with the reason.
+
 ## Branches and merges
 
 The log and the bases are committed with the plans, so two branches can each record edits. Both

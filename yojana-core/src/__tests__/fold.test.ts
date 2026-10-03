@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { YojanaEvent, YojanaEventInput } from '../events.ts';
-import { foldLog, isAnnotationOutdated, planHeads } from '../fold.ts';
+import { foldLog, isAnnotationOutdated, openAnomalies, planHeads } from '../fold.ts';
 import type { Requirement } from '../model.ts';
 import { requirementRevision } from '../revision.ts';
 
@@ -299,6 +299,9 @@ describe('foldLog: concurrent edits after a merge', () => {
     );
     expect(state.plans.get('p')?.contested.size).toBe(0);
     expect(planHeads(state, 'p').get('a')).toBe(settled.revision);
+    // The collision stays in the history, marked settled by the edit that resolved it.
+    expect(state.anomalies).toMatchObject([{ code: 'STALE_BASE', requirement: 'a', settledBy: 4 }]);
+    expect(openAnomalies(state)).toEqual([]);
   });
 
   test('edits to different requirements on two branches merge with no anomaly', () => {

@@ -11,6 +11,7 @@ export {
   type FoldState,
   foldLog,
   isAnnotationOutdated,
+  openAnomalies,
   type PlanState,
   planHeads,
   type StatusEntry,

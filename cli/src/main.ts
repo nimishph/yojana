@@ -17,12 +17,15 @@ import {
   type OpenChangeResult,
   openChange,
   openWorkspace,
+  type StatusReport,
   settleChangeFile,
+  status,
   VERSION,
   type Workspace,
 } from '@cntxt-labs/yojana';
-import { foldLog, YojanaError } from '@cntxt-labs/yojana-core';
+import { foldLog, type VerifierPort, YojanaError } from '@cntxt-labs/yojana-core';
 import { AnvesaVerifier, PathVerifier, spawnAnvesa } from '@cntxt-labs/yojana-verify';
+import { BdWorkLink, spawnBd } from '@cntxt-labs/yojana-work';
 
 const USAGE = `yojana ${VERSION}: plans as checkable contracts
 
@@ -32,21 +35,27 @@ Usage:
   yojana changes [--all]                    list open changes (--all: closed ones too)
   yojana archive <change>                   apply a change if what it edits has not moved
   yojana abandon <change> --reason <text>   close a change without applying it
-  yojana status                             plans, progress, staleness, drift        (v0)
+  yojana status [plan] [--check]            plans, progress, pending edits, open changes
   yojana check [plan] [--strict]            verify plan claims against the code
   yojana --version
 
 Options:
-  --root <dir>      repository root (default: current directory)
-  --plans <dir>     plan folder, relative to the root (default: plans)
-  --changes <dir>   change folder, relative to the root (default: changes)
-  --json            machine-readable output
-  --strict          check: also fail when a claim cannot be verified
+  --root <dir>       repository root (default: current directory)
+  --plans <dir>      plan folder, relative to the root (default: plans)
+  --changes <dir>    change folder, relative to the root (default: changes)
+  --json             machine-readable output
+  --strict           check: also fail when a claim cannot be verified
+  --check            status: also run the claim checks
+  --stale-days <n>   status: an open change older than this is stale (default 14)
 
-Claims run through anvesa (wql, dependents); set ANVESA_BIN if it is not on PATH.
+Claims run through anvesa (wql, dependents) and progress through bd; set ANVESA_BIN or BD_BIN if
+they are not on PATH.
 `;
 
 type Write = (text: string) => void;
+
+/** An open change older than this many days is reported stale; --stale-days overrides it. */
+const DEFAULT_STALE_DAYS = 14;
 
 interface Flags {
   readonly root: string;
@@ -56,6 +65,8 @@ interface Flags {
   readonly trustFile: boolean;
   readonly all: boolean;
   readonly strict: boolean;
+  readonly runCheck: boolean;
+  readonly staleDays: number;
   readonly reason: string | undefined;
   readonly positional: readonly string[];
 }
@@ -69,6 +80,8 @@ function parseFlags(argv: readonly string[]): Flags {
     trustFile: false,
     all: false,
     strict: false,
+    runCheck: false,
+    staleDays: DEFAULT_STALE_DAYS,
     reason: undefined as string | undefined,
     positional: [] as string[],
   };
@@ -87,7 +100,14 @@ function parseFlags(argv: readonly string[]): Flags {
     else if (arg === '--trust-file') flags.trustFile = true;
     else if (arg === '--all') flags.all = true;
     else if (arg === '--strict') flags.strict = true;
-    else if (arg.startsWith('--')) throw new YojanaError('CLI_USAGE', `unknown option ${arg}`);
+    else if (arg === '--check') flags.runCheck = true;
+    else if (arg === '--stale-days') {
+      const days = Number(value());
+      if (!Number.isInteger(days) || days < 0) {
+        throw new YojanaError('CLI_USAGE', '--stale-days needs a whole number of days');
+      }
+      flags.staleDays = days;
+    } else if (arg.startsWith('--')) throw new YojanaError('CLI_USAGE', `unknown option ${arg}`);
     else flags.positional.push(arg);
   }
   return flags;
@@ -338,20 +358,125 @@ function describeCheck(report: CheckReport): string {
   return `${lines.join('\n')}\n`;
 }
 
+function verifiers(root: string): VerifierPort[] {
+  return [
+    new PathVerifier(root),
+    new AnvesaVerifier(spawnAnvesa(process.env.ANVESA_BIN ?? 'anvesa', root)),
+  ];
+}
+
 function runCheck(flags: Flags, write: Write): Promise<number> {
   const [planId] = flags.positional;
   return withWorkspace(flags, write, async (ws) => {
-    const report = await check({
-      store: ws.store,
-      verifiers: [
-        new PathVerifier(flags.root),
-        new AnvesaVerifier(spawnAnvesa(process.env.ANVESA_BIN ?? 'anvesa', flags.root)),
-      ],
-      planId,
-    });
+    const report = await check({ store: ws.store, verifiers: verifiers(flags.root), planId });
     emit(flags, write, report, describeCheck(report));
     if (report.violated > 0) return 1;
     return flags.strict && report.unverifiable > 0 ? 1 : 0;
+  });
+}
+
+// status
+
+function day(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 'yyyy-mm-dd'.length);
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
+function describeStatus(report: StatusReport, checks: CheckReport | undefined): string {
+  const lines: string[] = [];
+  if (report.plans.length === 0) lines.push('no plans in the log; run yojana ingest first');
+  for (const plan of report.plans) {
+    const since = plan.statusSince === undefined ? '' : ` since ${day(plan.statusSince)}`;
+    lines.push(
+      `${plan.planId}  ${plan.status}${since}  ${plural(plan.requirements, 'requirement')}, ${plural(plan.claims, 'claim')}`,
+    );
+
+    const p = plan.progress;
+    if (p?.error !== undefined) lines.push(`  progress   could not read beads: ${p.error}`);
+    else if (p !== undefined && p.items.length > 0) {
+      const parts = p.items.map((i) => {
+        if (i.item.state === 'missing') return `${i.item.id} missing`;
+        if (i.children.length === 0) return `${i.item.id} ${i.item.state}`;
+        const done = i.children.filter((c) => c.state === 'closed').length;
+        return `${i.item.id} ${done}/${i.children.length}`;
+      });
+      lines.push(`  progress   ${p.done}/${p.total} done (${parts.join(', ')})`);
+    }
+
+    const f = plan.file;
+    if (f.kind === 'none') lines.push('  file       no plan file found for this plan');
+    else {
+      const pending = [
+        f.unrecorded.length > 0 ? `not ingested: ${f.unrecorded.join(', ')}` : '',
+        f.statusUnrecorded ? 'status not ingested' : '',
+        f.behind.length > 0 ? `behind the log: ${f.behind.join(', ')}` : '',
+        f.conflicts.length > 0 ? `conflicts with the log: ${f.conflicts.join(', ')}` : '',
+      ].filter((s) => s !== '');
+      lines.push(
+        `  file       ${f.source}  ${pending.length === 0 ? 'in step' : pending.join(' · ')}`,
+      );
+    }
+
+    if (plan.contested.length > 0) {
+      lines.push(
+        `  contested  ${plan.contested.join(', ')} (edited on two branches; resolve in the plan file, then ingest)`,
+      );
+    }
+    for (const c of plan.openChanges) {
+      lines.push(
+        `  change     ${c.id}  open ${plural(c.ageDays, 'day')}${c.stale ? '  STALE' : ''}  ${c.title}`,
+      );
+    }
+    const planChecks = checks?.plans.find((c) => c.planId === plan.planId);
+    if (planChecks !== undefined) {
+      const n = (o: string) => planChecks.results.filter((r) => r.outcome === o).length;
+      const violated = planChecks.results
+        .filter((r) => r.outcome === 'violated')
+        .map((r) => r.requirement);
+      lines.push(
+        `  claims     ${n('holds')} hold · ${n('violated')} violated · ${n('unverifiable')} could not be checked${violated.length > 0 ? `  (${[...new Set(violated)].join(', ')})` : ''}`,
+      );
+    }
+  }
+  for (const u of report.untracked) {
+    const why =
+      u.issues.length > 0
+        ? u.issues
+            .map((i) => `${i.line === undefined ? '' : `line ${i.line}: `}${i.code}`)
+            .join(', ')
+        : `plan ${u.planId} is not in the log yet; run yojana ingest`;
+    lines.push(`untracked  ${u.source}  ${why}`);
+  }
+  if (report.anomalies.length > 0) {
+    lines.push(
+      '',
+      `${plural(report.anomalies.length, 'anomaly')} in the log (yojana status --json lists them)`,
+    );
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+function runStatus(flags: Flags, write: Write): Promise<number> {
+  const [planId] = flags.positional;
+  return withWorkspace(flags, write, async (ws) => {
+    const report = await status({
+      store: ws.store,
+      parser: ws.parser,
+      bases: ws.bases,
+      files: loadPlanFiles(flags.root, ws.plansDir),
+      worklink: new BdWorkLink(spawnBd(process.env.BD_BIN ?? 'bd', flags.root)),
+      now: Date.now(),
+      staleDays: flags.staleDays,
+      planId,
+    });
+    const checks = flags.runCheck
+      ? await check({ store: ws.store, verifiers: verifiers(flags.root), planId })
+      : undefined;
+    emit(flags, write, { ...report, checks }, describeStatus(report, checks));
+    return 0;
   });
 }
 
@@ -395,6 +520,7 @@ export async function run(argv: readonly string[], write: Write): Promise<number
     if (command === 'archive') return await runArchive(flags(), write);
     if (command === 'abandon') return await runAbandon(flags(), write);
     if (command === 'check') return await runCheck(flags(), write);
+    if (command === 'status') return await runStatus(flags(), write);
   } catch (error) {
     if (error instanceof YojanaError) {
       write(

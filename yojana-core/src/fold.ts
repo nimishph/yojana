@@ -53,6 +53,19 @@ export interface Anomaly {
   readonly seq: number;
   readonly code: string;
   readonly message: string;
+  /** For STALE_BASE: the requirement whose edits collided. */
+  readonly planId?: string | undefined;
+  readonly requirement?: RequirementId | undefined;
+  /**
+   * For STALE_BASE: the seq of the later edit, written against the head, that settled the
+   * collision. A settled anomaly is history, kept in the log but no longer needing attention.
+   */
+  settledBy?: number | undefined;
+}
+
+/** Anomalies that still need attention: everything except settled collisions. */
+export function openAnomalies(state: FoldState): Anomaly[] {
+  return state.anomalies.filter((a) => a.settledBy === undefined);
 }
 
 export interface FoldState {
@@ -92,14 +105,25 @@ function applyDelta(state: FoldState, plan: PlanState, delta: Delta, seq: number
   if (stale) {
     const competing = plan.contested.get(id) ?? [actual];
     plan.contested.set(id, [...competing, after]);
-  } else {
-    plan.contested.delete(id);
+  } else if (plan.contested.delete(id)) {
+    for (const anomaly of state.anomalies) {
+      if (
+        anomaly.code === 'STALE_BASE' &&
+        anomaly.planId === plan.id &&
+        anomaly.requirement === id &&
+        anomaly.settledBy === undefined
+      ) {
+        anomaly.settledBy = seq;
+      }
+    }
   }
   if (stale) {
     state.anomalies.push({
       seq,
       code: 'STALE_BASE',
       message: `${delta.op} of ${id} in ${plan.id} expected ${delta.base ?? 'no requirement'}, log had ${actual ?? 'none'}`,
+      planId: plan.id,
+      requirement: id,
     });
   }
   if (delta.op === 'remove') plan.heads.delete(id);
