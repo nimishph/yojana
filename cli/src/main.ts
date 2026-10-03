@@ -25,7 +25,7 @@ import {
   type Workspace,
 } from '@cntxt-labs/yojana';
 import { foldLog, type VerifierPort, YojanaError } from '@cntxt-labs/yojana-core';
-import { AnvesaVerifier, PathVerifier, spawnAnvesa } from '@cntxt-labs/yojana-verify';
+import { AnvesaVerifier, PathVerifier, spawnAnvesa, TextVerifier } from '@cntxt-labs/yojana-verify';
 import { BdWorkLink, spawnBd } from '@cntxt-labs/yojana-work';
 
 const USAGE = `yojana ${VERSION}: plans as checkable contracts
@@ -372,6 +372,7 @@ function describeCheck(report: CheckReport): string {
 function verifiers(root: string): VerifierPort[] {
   return [
     new PathVerifier(root),
+    new TextVerifier(root),
     new AnvesaVerifier(spawnAnvesa(process.env.ANVESA_BIN ?? 'anvesa', root)),
   ];
 }

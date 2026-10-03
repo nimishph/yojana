@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { type Claim, YojanaError } from '@cntxt-labs/yojana-core';
 import { type AnvesaRunner, AnvesaVerifier } from '../anvesa.ts';
 import { PathVerifier } from '../path.ts';
+import { TextVerifier } from '../text.ts';
 
 // Output shapes below are copied from anvesa 0.6.0 (`--json`).
 const queryHit = {
@@ -206,5 +207,49 @@ describe('AnvesaVerifier: wql "in" parsing', () => {
     );
     expect(seen[0]?.[1]).toBe('//function[@name="sign in user"]');
     expect(seen[0]?.[3]).toBe('1');
+  });
+});
+
+describe('TextVerifier', () => {
+  const root = mkdtempSync(join(tmpdir(), 'yojana-text-'));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'tooling'), { recursive: true });
+  mkdirSync(join(root, 'src'), { recursive: true });
+  writeFileSync(
+    join(root, 'tooling', 'platforms.ts'),
+    "export const P = [\n  'linux-x64',\n  'darwin-arm64',\n];\n",
+  );
+  writeFileSync(join(root, 'src', 'a.ts'), 'const a = 1;\nconsole.log(a);\n');
+  writeFileSync(join(root, 'src', 'b.ts'), 'export const b = 2;\n');
+
+  const verify = (expression: string, expectValue = true) =>
+    new TextVerifier(root).verify('r', claim('text', expression, expectValue));
+
+  test('a missing string in a named file is violated, with how much was searched', async () => {
+    expect(await verify('darwin-x64 in tooling/platforms.ts')).toMatchObject({
+      outcome: 'violated',
+      evidence: 'not found (1 file searched)',
+    });
+    expect(await verify('darwin-arm64 in tooling/platforms.ts')).toMatchObject({
+      outcome: 'holds',
+      evidence: 'found at tooling/platforms.ts:3 (1 line, 1 file searched)',
+    });
+  });
+
+  test('a /regex/ over a glob, with expect: false', async () => {
+    expect(await verify(String.raw`/console\.log\(/ in src/**/*.ts`, false)).toMatchObject({
+      outcome: 'violated',
+      evidence: 'found at src/a.ts:2 (1 line, 2 files searched)',
+    });
+    expect((await verify('/DEBUGGER/i in src/**/*.ts', false)).outcome).toBe('holds');
+  });
+
+  test('no file to search, a bad pattern, or a malformed expression is unverifiable', async () => {
+    expect(await verify('x in nowhere/**/*.ts', false)).toMatchObject({
+      outcome: 'unverifiable',
+      evidence: 'no file matches nowhere/**/*.ts',
+    });
+    expect((await verify('/(unclosed/ in src/a.ts')).outcome).toBe('unverifiable');
+    expect((await verify('just a pattern')).outcome).toBe('unverifiable');
   });
 });

@@ -65,6 +65,7 @@ never counts as holding; `--strict` makes it fail the run.
 | `path` | a path or glob from the repo root | a file exists |
 | `wql` | `<wql> [in <dir>]` | anvesa's query matches, only in files under `<dir>` if given |
 | `dependents` | `<path> [from <dir>]` | something imports `<path>`, only importers under `<dir>` if given |
+| `text` | `<regex> in <path or glob>` (`/re/flags` allowed) | a line in those files matches; no file to search is unverifiable |
 
 A scoped claim's evidence also states how many matched overall, so a check that passes only
 because nothing matches anywhere is visible.
@@ -107,7 +108,7 @@ change file to `changes/archive/<date>-<id>.md`; `abandon --reason` moves it to
 | StorePort | local append-only revision log | memory, JSONL file | SQLite |
 | SyncPort | copy the log elsewhere | noop, file bundle | git ref (`refs/yojana/*`), Dolt, HTTP/S3 |
 | ParserPort | files ⇄ plans | Markdown | OpenSpec import/export, HTML review renderer, MDX render |
-| VerifierPort | check claims against code | anvesa (`wql`, `dependents`), filesystem (`path`) | text, shell command |
+| VerifierPort | check claims against code | anvesa (`wql`, `dependents`), filesystem (`path`, `text`) | shell command |
 | WorkLinkPort | plan ⇄ execution | bd | others |
 | RuleSink | proven decisions → rules | — | medha `propose` |
 
@@ -211,6 +212,6 @@ changes, claim checks through anvesa, progress from bd, status, refresh and repa
 
 Dogfooding anvesa's own roadmap found that 7 of its 8 claims already hold in the code while all 7
 beads were still open. Next, from that run: link each requirement to its work items so status can
-flag "claims hold, bead open" (yoj-nw5); a `text` claim kind for strings in files (yoj-zuq); an
+flag "claims hold, bead open" (yoj-nw5); an
 importer for existing roadmaps (yoj-04r). Later: the HTML review renderer (yoj-djd), OpenSpec
 import/export, git-ref and Dolt sync, a medha rule sink, and a Claude Code plugin.
