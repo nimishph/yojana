@@ -1,160 +1,89 @@
 /**
- * The script of a served review page (`review --serve`). Plain ES5-style JavaScript in a raw
- * string: no template literals, so nothing in it is interpolated. Text a person types goes into the
- * page only through form values and textContent, never as HTML. Every write is a POST to the local
- * server with the page's token; the server applies the same checks as the CLI and answers with a
- * message, and the page reloads to show the result.
+ * The only hand-written script on a served review page: the selection toolbar. htmx does every
+ * request; this script only notices a text selection inside one requirement, shows a small toolbar
+ * by it, and asks htmx for the comment form (with the selection as its quote) in a popover there,
+ * or for the suggest form in the requirement. Plain ES5-style JavaScript in a raw string: no
+ * template literals, so nothing in it is interpolated.
  */
-export const LIVE_SCRIPT = String.raw`
+export const SELECTION_SCRIPT = String.raw`
 (function () {
-  var data = JSON.parse(document.getElementById('yojana-data').textContent);
-  var statusEl = document.getElementById('status');
-  var selected = {};
+  var plan = document.body.getAttribute('data-plan');
+  var bar = document.getElementById('selbar');
+  var pop = document.getElementById('selpop');
+  var picked = null;
 
-  function say(message, isError) {
-    statusEl.textContent = message;
-    statusEl.className = isError ? 'error' : '';
-    statusEl.hidden = false;
-  }
+  function hideBar() { bar.hidden = true; }
+  function hidePop() { pop.hidden = true; pop.textContent = ''; }
 
-  function post(path, body) {
-    return fetch(path, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-yojana-token': data.token },
-      body: JSON.stringify(body)
-    }).then(function (response) {
-      return response.json().then(function (json) { return { status: response.status, body: json }; });
-    }).catch(function () {
-      return { status: 0, body: { message: 'Could not reach yojana. Is review --serve still running?' } };
-    });
-  }
-
-  function finish(result) {
-    if (result.status === 200) {
-      say(result.body.message || 'Saved.');
-      setTimeout(function () { location.reload(); }, 700);
-      return;
-    }
-    var message = (result.body && result.body.message) || ('Failed (' + result.status + ').');
-    if (result.body && result.body.code === 'STALE' && result.body.current) {
-      message += ' It now reads: "' + result.body.current.text + '". Reload to work on the current text.';
-    }
-    say(message, true);
-  }
-
-  // Text selected inside a requirement becomes the quote of a new comment on it.
-  document.addEventListener('mouseup', function () {
+  function selectionInRequirement() {
     var selection = window.getSelection();
-    if (!selection || selection.isCollapsed || !selection.anchorNode) return;
-    var node = selection.anchorNode.nodeType === 1 ? selection.anchorNode : selection.anchorNode.parentElement;
-    var box = node && node.closest('.text[data-req]');
-    if (box) selected[box.getAttribute('data-req')] = selection.toString().trim();
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+    var range = selection.getRangeAt(0);
+    var start = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+    var end = range.endContainer.nodeType === 1 ? range.endContainer : range.endContainer.parentElement;
+    var box = start && start.closest('.text[data-req]');
+    if (!box || !end || end.closest('.text[data-req]') !== box) return null;
+    var text = selection.toString().replace(/\s+/g, ' ').trim();
+    if (text === '') return null;
+    return { req: box.getAttribute('data-req'), quote: text, rect: range.getBoundingClientRect() };
+  }
+
+  function place(element, rect, below) {
+    var top = window.scrollY + (below ? rect.bottom + 8 : rect.top - 44);
+    var left = Math.max(16, Math.min(window.scrollX + rect.left, window.scrollX + document.documentElement.clientWidth - element.offsetWidth - 16));
+    element.style.top = top + 'px';
+    element.style.left = left + 'px';
+  }
+
+  var pending = false;
+  document.addEventListener('selectionchange', function () {
+    if (pending || pop.contains(document.activeElement)) return;
+    pending = true;
+    setTimeout(function () {
+      pending = false;
+      picked = selectionInRequirement();
+      if (!picked) { hideBar(); return; }
+      bar.hidden = false;
+      place(bar, picked.rect, false);
+    });
   });
 
-  function slot(key) {
-    return document.querySelector('[data-slot="' + CSS.escape(key) + '"]');
-  }
-
-  function openForm(key, fields, submitLabel, send) {
-    var target = slot(key);
-    if (!target) return;
-    target.textContent = '';
-    var form = document.createElement('form');
-    form.className = 'inline';
-    fields.forEach(function (field) {
-      var label = document.createElement('label');
-      var caption = document.createElement('span');
-      caption.className = 'label';
-      caption.textContent = field.label;
-      var input = document.createElement(field.multiline ? 'textarea' : 'input');
-      input.name = field.name;
-      input.value = field.value || '';
-      if (field.required) input.required = true;
-      label.appendChild(caption);
-      label.appendChild(input);
-      form.appendChild(label);
-    });
-    var row = document.createElement('div');
-    row.className = 'actions';
-    var submit = document.createElement('button');
-    submit.type = 'submit';
-    submit.className = 'primary';
-    submit.textContent = submitLabel;
-    var cancel = document.createElement('button');
-    cancel.type = 'button';
-    cancel.textContent = 'Cancel';
-    cancel.addEventListener('click', function () { target.textContent = ''; });
-    row.appendChild(submit);
-    row.appendChild(cancel);
-    form.appendChild(row);
-    form.addEventListener('submit', function (event) {
-      event.preventDefault();
-      var values = {};
-      fields.forEach(function (field) { values[field.name] = form.elements[field.name].value; });
-      submit.disabled = true;
-      send(values).then(function (result) {
-        submit.disabled = false;
-        finish(result);
+  bar.addEventListener('mousedown', function (event) { event.preventDefault(); });
+  bar.addEventListener('click', function (event) {
+    var button = event.target.closest('button[data-sel]');
+    if (!button || !picked) return;
+    var req = encodeURIComponent(picked.req);
+    var base = '/plan/' + encodeURIComponent(plan) + '/form/';
+    hideBar();
+    if (button.getAttribute('data-sel') === 'comment') {
+      var rect = picked.rect;
+      htmx.ajax('GET', base + 'comment/' + req + '?quote=' + encodeURIComponent(picked.quote), { target: '#selpop', swap: 'innerHTML' }).then(function () {
+        pop.hidden = false;
+        place(pop, rect, true);
+        var box = pop.querySelector('textarea');
+        if (box) box.focus();
       });
-    });
-    target.appendChild(form);
-    var first = form.querySelector('textarea, input');
-    if (first) first.focus();
-  }
-
-  document.addEventListener('click', function (event) {
-    var button = event.target.closest('button[data-act]');
-    if (!button) return;
-    var act = button.getAttribute('data-act');
-    var req = button.getAttribute('data-req');
-    var shown = req ? data.requirements[req] : undefined;
-
-    if (act === 'edit' || act === 'suggest') {
-      var fields = [
-        { name: 'title', label: 'Title', value: shown.title, required: true },
-        { name: 'text', label: 'Text (Markdown)', value: shown.text, multiline: true }
-      ];
-      if (act === 'suggest') fields.push({ name: 'why', label: 'Why (optional)', multiline: true });
-      openForm(req, fields, act === 'edit' ? 'Save to the plan' : 'Open as a change', function (values) {
-        return post('/api/' + act, {
-          planId: data.planId,
-          requirement: req,
-          revision: shown.revision,
-          title: values.title,
-          text: values.text,
-          why: values.why
-        });
-      });
-    } else if (act === 'comment') {
-      openForm(req, [
-        { name: 'body', label: 'Comment', multiline: true, required: true },
-        { name: 'quote', label: 'Quote (select text in the requirement to fill this)', value: selected[req] || '' }
-      ], 'Comment', function (values) {
-        return post('/api/comment', { planId: data.planId, requirement: req, body: values.body, quote: values.quote });
-      });
-    } else if (act === 'reply') {
-      var id = button.getAttribute('data-id');
-      openForm(id, [{ name: 'body', label: 'Reply', multiline: true, required: true }], 'Reply', function (values) {
-        return post('/api/comment', { planId: data.planId, requirement: req, body: values.body, replyTo: id });
-      });
-    } else if (act === 'accept') {
-      var acceptId = button.getAttribute('data-change');
-      openForm('change:' + acceptId, [], 'Accept and apply', function () {
-        return post('/api/accept', { changeId: acceptId });
-      });
-    } else if (act === 'recheck') {
-      button.disabled = true;
-      say('Refreshing: asking bd again, and re-running claims if the server checks them. This can take a little while.');
-      post('/api/check', { planId: data.planId }).then(function (result) {
-        button.disabled = false;
-        finish(result);
-      });
-    } else if (act === 'reject') {
-      var rejectId = button.getAttribute('data-change');
-      openForm('change:' + rejectId, [{ name: 'reason', label: 'Why reject it?', required: true }], 'Reject', function (values) {
-        return post('/api/reject', { changeId: rejectId, reason: values.reason });
+    } else {
+      var slot = document.getElementById('slot-' + picked.req.replace(/[^a-zA-Z0-9_-]/g, '-'));
+      htmx.ajax('GET', base + 'suggest/' + req, { target: slot, swap: 'innerHTML' }).then(function () {
+        slot.scrollIntoView({ block: 'nearest' });
       });
     }
+  });
+
+  // A form in the popover that went through closes the popover; so do Cancel, Escape and a click away.
+  document.body.addEventListener('htmx:afterRequest', function (event) {
+    if (pop.contains(event.target) && event.detail.successful) hidePop();
+  });
+  pop.addEventListener('click', function (event) {
+    var button = event.target.closest('button[type="button"]');
+    if (button && button.textContent === 'Cancel') hidePop();
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') { hideBar(); hidePop(); }
+  });
+  document.addEventListener('mousedown', function (event) {
+    if (!pop.hidden && !pop.contains(event.target) && !bar.contains(event.target)) hidePop();
   });
 })();
 `;

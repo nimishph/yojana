@@ -34,7 +34,7 @@ export async function comment(options: {
     return fail('NOT_FOUND', `${options.requirement} is not a requirement of ${options.planId}`);
   }
   const quote = options.quote?.trim();
-  if (quote !== undefined && quote !== '' && !head.text.includes(quote)) {
+  if (quote !== undefined && quote !== '' && !quoteAppears(head.text, quote)) {
     return fail('QUOTE_NOT_FOUND', `"${quote}" does not appear in ${options.requirement}`);
   }
   if (options.replyTo !== undefined && !plan.annotations.some((a) => a.id === options.replyTo)) {
@@ -55,4 +55,17 @@ export async function comment(options: {
     options.author,
   );
   return { ok: true, annotation };
+}
+
+/**
+ * Text as a reader sees it: Markdown marks (backticks, emphasis) and line breaks do not count. A
+ * quote selected on the rendered page has lost them, so it is compared in this form.
+ */
+function asRead(text: string): string {
+  return text.replace(/[`*_]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/** Whether a quote appears in a requirement, as written or as the page renders it. */
+export function quoteAppears(text: string, quote: string): boolean {
+  return text.includes(quote) || asRead(text).includes(asRead(quote));
 }

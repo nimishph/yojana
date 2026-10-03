@@ -7,11 +7,18 @@ import {
   type CheckReport,
   check,
   comment,
+  commentForm,
+  editForm,
   editRequirement,
+  errorFragment,
   escapeHtml,
   loadPlanFiles,
   openWorkspace,
+  type ReviewContext,
+  rejectForm,
+  renderSection,
   review,
+  reviewContext,
   settleChangeFile,
   status,
   suggestEdit,
@@ -24,17 +31,22 @@ import {
   type WorkLookup,
   YojanaError,
 } from '@cntxt-labs/yojana-core';
+import htmxSource from 'htmx.org/dist/htmx.min.js' with { type: 'text' };
 
 /**
- * `yojana review --serve`: the review page, live, on this machine only.
+ * `yojana review --serve`: the review page, live, on this machine only, driven by htmx.
  *
- *   GET  /                      plans in the log
- *   GET  /plan/<id>             the review page, with edit, suggest, comment, accept and reject
- *   POST /api/edit|suggest|comment|accept|reject
+ *   GET  /                                   plans in the log
+ *   GET  /plan/<id>                          the review page
+ *   GET  /plan/<id>/form/<kind>/<target>     a form: edit, suggest, comment, reply, reject
+ *   POST /api/edit|suggest|comment|accept|reject|check   (form-encoded, as htmx sends)
+ *   GET  /static/htmx.js                     htmx, served from the installed package (0BSD)
  *
- * Every write goes through the engine with the same checks as the CLI, one at a time, on a log
- * reopened for the request, so the CLI can be used alongside. Writes need the token embedded in
- * the page and a Host of this server: another website the person has open cannot post here.
+ * Answers are HTML. A write that succeeds answers with the updated requirement (htmx swaps it in
+ * place) or asks for a reload; one that is refused answers with the same form, input kept, and
+ * why. Every write goes through the engine with the same checks as the CLI, one at a time, on a
+ * log reopened for the request, so the CLI can be used alongside. Writes need the token the page
+ * carries (htmx sends it as a header) and a Host of this server: another website cannot post here.
  */
 
 export interface ServeOptions {
@@ -55,27 +67,33 @@ export interface ReviewServer {
   stop(): void;
 }
 
-type Json = Record<string, unknown>;
+type Fields = Record<string, string>;
 
 /** Seconds a request may run before Bun drops the connection (its default is 10). */
 const IDLE_SECONDS = 120;
 
-function json(body: Json, statusCode = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status: statusCode,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
-  });
-}
-
-function html(body: string, statusCode = 200): Response {
+function html(body: string, statusCode = 200, headers: Record<string, string> = {}): Response {
   return new Response(body, {
     status: statusCode,
-    headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+      ...headers,
+    },
   });
 }
 
-function text(value: unknown): string {
-  return typeof value === 'string' ? value : '';
+/** Ask htmx to reload the page: for changes that touch more than one part of it. */
+function reload(): Response {
+  return html('', 200, { 'HX-Refresh': 'true' });
+}
+
+/** Put this requirement's fresh section where it was, replacing the form that asked. */
+function swapSection(requirementId: string, body: string): Response {
+  return html(body, 200, {
+    'HX-Retarget': `[id="${requirementId}"]`,
+    'HX-Reswap': 'outerHTML',
+  });
 }
 
 export function startReviewServer(options: ServeOptions): ReviewServer {
@@ -84,7 +102,7 @@ export function startReviewServer(options: ServeOptions): ReviewServer {
   /** The previous write's completion; a write waits for it, so writes never interleave. */
   let lastWrite: Promise<void> = Promise.resolve();
 
-  /** Run with the workspace's log open; writes are queued so they never interleave. */
+  /** Run with the workspace's log open; writes wait their turn. */
   const withLog = <T>(work: (ws: Workspace) => Promise<T>, write: boolean): Promise<T> => {
     const run = async () => {
       const ws = openWorkspace(options.root, {
@@ -120,13 +138,7 @@ export function startReviewServer(options: ServeOptions): ReviewServer {
     })();
   };
 
-  const writePlan = (source: string, content: string) =>
-    writeFileSync(join(options.root, source), content);
-
-  // Claim checks run anvesa once per claim, which takes seconds; they are cached per plan and
-  // re-run on request, not on every page load.
-  const checked = new Map<string, { readonly report: CheckReport; readonly at: number }>();
-  // bd takes seconds per call to start, so its answers are cached too, until the page asks for a
+  // bd takes seconds per call to start, so its answers are cached, until the page asks for a
   // refresh. A failed lookup is not cached: the next page load asks again.
   const workCache = new Map<string, Promise<WorkLookup>>();
   const tracker = options.worklink();
@@ -146,6 +158,9 @@ export function startReviewServer(options: ServeOptions): ReviewServer {
     children: (id) => remember(`children ${id}`, () => tracker.children(id)),
   };
 
+  // Claim checks run anvesa once per claim, which takes seconds; they are cached per plan and
+  // re-run on request, not on every page load.
+  const checked = new Map<string, { readonly report: CheckReport; readonly at: number }>();
   const runChecks = async (ws: Workspace, planId: string) => {
     const report = await check({ store: ws.store, verifiers: options.verifiers(), planId });
     const entry = { report, at: Date.now() };
@@ -153,19 +168,47 @@ export function startReviewServer(options: ServeOptions): ReviewServer {
     return entry;
   };
 
+  const context = async (ws: Workspace, planId: string): Promise<ReviewContext | undefined> => {
+    const cached = options.runCheck
+      ? (checked.get(planId) ?? (await runChecks(ws, planId)))
+      : undefined;
+    const report = await status({
+      store: ws.store,
+      parser: ws.parser,
+      bases: ws.bases,
+      files: loadPlanFiles(options.root, ws.plansDir),
+      worklink,
+      checks: cached?.report,
+      now: Date.now(),
+      staleDays: 14,
+      planId,
+    });
+    return reviewContext({
+      store: ws.store,
+      planId,
+      status: report,
+      checks: cached?.report.plans.find((p) => p.planId === planId)?.results,
+      interactive: { token, checkedAt: cached?.at },
+    });
+  };
+
+  const section = async (ws: Workspace, planId: string, requirementId: string) => {
+    const ctx = await context(ws, planId);
+    return (ctx === undefined ? undefined : renderSection(ctx, requirementId)) ?? '';
+  };
+
   const page = (planId: string) =>
     withLog(async (ws) => {
       const cached = options.runCheck
         ? (checked.get(planId) ?? (await runChecks(ws, planId)))
         : undefined;
-      const checks = cached?.report;
       const report = await status({
         store: ws.store,
         parser: ws.parser,
         bases: ws.bases,
         files: loadPlanFiles(options.root, ws.plansDir),
         worklink,
-        checks,
+        checks: cached?.report,
         now: Date.now(),
         staleDays: 14,
         planId,
@@ -174,7 +217,7 @@ export function startReviewServer(options: ServeOptions): ReviewServer {
         store: ws.store,
         planId,
         status: report,
-        checks: checks?.plans.find((p) => p.planId === planId)?.results,
+        checks: cached?.report.plans.find((p) => p.planId === planId)?.results,
         generatedAt: Date.now(),
         interactive: { token, checkedAt: cached?.at },
       });
@@ -192,43 +235,80 @@ export function startReviewServer(options: ServeOptions): ReviewServer {
       return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>yojana review</title><style>body{font:16px/1.6 system-ui,sans-serif;margin:0;padding:40px 16px;background:#f6f7f9;color:#1b2430}main{max-width:720px;margin:0 auto}li{margin:6px 0}span{color:#5d6a78;font-size:14px}@media (prefers-color-scheme:dark){body{background:#12161c;color:#e3e8ee}a{color:#8fa9ec}span{color:#9aa7b4}}</style></head><body><main><h1>Plans</h1>${items === '' ? '<p>No plans in the log yet; run yojana ingest.</p>' : `<ul>${items}</ul>`}</main></body></html>`;
     }, false);
 
-  const api = async (action: string, body: Json): Promise<Response> => {
-    const planId = text(body.planId);
-    const requirement = text(body.requirement);
-    return withLog(async (ws) => {
+  /** GET /plan/<id>/form/<kind>/<target>: a form, drawn from the log as it is now. */
+  const form = (planId: string, kind: string, target: string, query: URLSearchParams) =>
+    withLog(async (ws) => {
+      const plan = foldLog(await ws.store.events()).plans.get(planId);
+      if (kind === 'reject') return html(rejectForm({ changeId: target }));
+      const requirement = plan?.heads.get(target);
+      if (requirement === undefined) {
+        return html(errorFragment(`${target} is not a requirement of ${planId}`), 404);
+      }
+      if (kind === 'edit' || kind === 'suggest') {
+        return html(editForm({ planId, requirement, mode: kind }));
+      }
+      if (kind === 'comment') {
+        return html(
+          commentForm({ planId, requirementId: target, quote: query.get('quote') ?? undefined }),
+        );
+      }
+      if (kind === 'reply') {
+        return html(
+          commentForm({ planId, requirementId: target, replyTo: query.get('to') ?? undefined }),
+        );
+      }
+      return html(errorFragment(`no form ${kind}`), 404);
+    }, false);
+
+  const api = (action: string, fields: Fields): Promise<Response> =>
+    withLog(async (ws) => {
+      const planId = fields.planId ?? '';
+      const requirementId = fields.requirement ?? '';
       const files = () => loadPlanFiles(options.root, ws.plansDir);
+      const writePlan = (source: string, content: string) =>
+        writeFileSync(join(options.root, source), content);
+
       if (action === 'check') {
         workCache.clear();
-        if (!options.runCheck) return json({ ok: true, message: 'Refreshed the beads.' });
-        const { report } = await runChecks(ws, planId);
-        return json({
-          ok: true,
-          message: `Refreshed the beads and checked claims: ${report.holds} hold, ${report.violated} violated, ${report.unverifiable} could not be checked.`,
-        });
+        if (options.runCheck) await runChecks(ws, planId);
+        return reload();
       }
+
       if (action === 'comment') {
         const result = await comment({
           store: ws.store,
           planId,
-          requirement,
-          body: text(body.body),
+          requirement: requirementId,
+          body: fields.body ?? '',
           author: options.actor,
-          quote: text(body.quote) || undefined,
-          replyTo: text(body.replyTo) || undefined,
+          quote: fields.quote || undefined,
+          replyTo: fields.replyTo || undefined,
         });
-        return result.ok
-          ? json({ ok: true, message: `Comment ${result.annotation.id} added.` })
-          : json({ ok: false, code: result.code, message: result.message }, 400);
+        if (!result.ok) {
+          return html(
+            commentForm({
+              planId,
+              requirementId,
+              quote: fields.quote,
+              replyTo: fields.replyTo || undefined,
+              body: fields.body,
+              error: result.message,
+            }),
+            400,
+          );
+        }
+        return swapSection(requirementId, await section(ws, planId, requirementId));
       }
+
       if (action === 'edit' || action === 'suggest') {
         const request = {
           store: ws.store,
           parser: ws.parser,
           planId,
-          requirementId: requirement,
-          expectedRevision: text(body.revision),
-          title: text(body.title),
-          text: text(body.text),
+          requirementId,
+          expectedRevision: fields.revision ?? '',
+          title: fields.title ?? '',
+          text: fields.text ?? '',
           actor: options.actor,
         };
         const result =
@@ -236,7 +316,7 @@ export function startReviewServer(options: ServeOptions): ReviewServer {
             ? await editRequirement({ ...request, bases: ws.bases, files: files(), writePlan })
             : await suggestEdit({
                 ...request,
-                why: text(body.why),
+                why: fields.why ?? '',
                 changesDir: toSource(ws.changesDir),
                 writeChange: (source, content) => {
                   mkdirSync(join(options.root, source, '..'), { recursive: true });
@@ -244,17 +324,35 @@ export function startReviewServer(options: ServeOptions): ReviewServer {
                 },
               });
         if (result.ok) {
-          return json({
-            ok: true,
-            message:
-              'changeId' in result
-                ? `Opened ${result.changeId} (${result.source}).`
-                : `Saved ${requirement} to the plan and recorded it.`,
-          });
+          // A suggestion adds an open change at the top of the page; an edit only this section.
+          return action === 'suggest'
+            ? reload()
+            : swapSection(requirementId, await section(ws, planId, requirementId));
         }
-        return json(result, result.code === 'STALE' ? 409 : 400);
+        const head = foldLog(await ws.store.events())
+          .plans.get(planId)
+          ?.heads.get(requirementId);
+        if (head === undefined) return html(errorFragment(result.message), 404);
+        const message =
+          result.code === 'STALE'
+            ? `${result.message}. It now reads:\n\n${result.current.text}\n\nReload the page to work on the current text; your text is kept below.`
+            : result.message;
+        // The form keeps the revision it was opened on, so a stale edit stays refused until the
+        // person reloads and sees what changed.
+        const shown = { ...head, revision: fields.revision ?? head.revision };
+        return html(
+          editForm({
+            planId,
+            requirement: shown,
+            mode: action,
+            values: { title: fields.title, text: fields.text, why: fields.why },
+            error: message,
+          }),
+          result.code === 'STALE' ? 409 : 400,
+        );
       }
-      const changeId = text(body.changeId);
+
+      const changeId = fields.changeId ?? '';
       if (action === 'accept') {
         const result = await archiveChange({
           store: ws.store,
@@ -268,83 +366,99 @@ export function startReviewServer(options: ServeOptions): ReviewServer {
         if (result.outcome !== 'archived') {
           const why = [
             ...result.problems.map((p) => p.message),
-            ...result.conflicts.map((c) => `${c.requirement} changed since the change was opened`),
+            ...result.conflicts.map(
+              (c) =>
+                `${c.requirement} changed since this change was opened; reject it, or open it again against the current text`,
+            ),
           ].join('; ');
-          return json({ ok: false, code: 'REFUSED', message: why }, 409);
+          return html(errorFragment(why), 409);
         }
         if (result.change?.source !== undefined) {
           settleChangeFile(options.root, result.change.source, 'archive', new Date());
         }
-        const note =
-          result.planFile?.updated === true
-            ? 'the plan file is updated'
-            : 'the plan file has other edits, so run yojana refresh after ingesting them';
-        return json({ ok: true, message: `Accepted ${changeId}; ${note}.` });
+        return reload();
       }
+
       if (action === 'reject') {
         const result = await abandonChange({
           store: ws.store,
           changeId,
-          reason: text(body.reason),
+          reason: fields.reason ?? '',
           actor: options.actor,
         });
         if (result.outcome !== 'abandoned') {
-          return json(
-            {
-              ok: false,
-              code: 'REFUSED',
-              message: result.problems.map((p) => p.message).join('; '),
-            },
+          return html(
+            rejectForm({ changeId, error: result.problems.map((p) => p.message).join('; ') }),
             400,
           );
         }
         if (result.change?.source !== undefined) {
           settleChangeFile(options.root, result.change.source, 'abandoned', new Date());
         }
-        return json({ ok: true, message: `Rejected ${changeId}.` });
+        return reload();
       }
-      return json({ ok: false, code: 'NOT_FOUND', message: `no action ${action}` }, 404);
+
+      return html(errorFragment(`no action ${action}`), 404);
     }, true);
+
+  const readFields = async (request: Request): Promise<Fields> => {
+    const type = request.headers.get('content-type') ?? '';
+    if (type.includes('application/json')) {
+      const body = (await request.json()) as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.entries(body).map(([k, v]) => [k, typeof v === 'string' ? v : '']),
+      );
+    }
+    const form = await request.formData();
+    const fields: Fields = {};
+    form.forEach((value, key) => {
+      if (typeof value === 'string') fields[key] = value;
+    });
+    return fields;
   };
 
   const server = Bun.serve({
     hostname: '127.0.0.1',
-    // Re-running claim checks can take a while; do not drop the connection meanwhile.
-    idleTimeout: IDLE_SECONDS,
     port: options.port,
+    // Refreshing claim checks can take a while; do not drop the connection meanwhile.
+    idleTimeout: IDLE_SECONDS,
     async fetch(request) {
       const url = new URL(request.url);
       const host = request.headers.get('host') ?? '';
       if (host !== `127.0.0.1:${url.port}` && host !== `localhost:${url.port}`) {
-        return json({ ok: false, code: 'FORBIDDEN', message: 'unexpected host' }, 403);
+        return html(errorFragment('unexpected host'), 403);
       }
+      const parts = url.pathname.split('/').map((p) => decodeURIComponent(p));
       try {
-        if (request.method === 'GET' && url.pathname === '/') return html(await index());
-        if (request.method === 'GET' && url.pathname.startsWith('/plan/')) {
-          const planId = decodeURIComponent(url.pathname.slice('/plan/'.length));
-          const body = await page(planId);
-          return body === undefined
-            ? html(`<p>No plan ${escapeHtml(planId)} in the log.</p>`, 404)
-            : html(body);
+        if (request.method === 'GET') {
+          if (url.pathname === '/') return html(await index());
+          if (url.pathname === '/static/htmx.js') {
+            return new Response(htmxSource, {
+              headers: { 'content-type': 'text/javascript; charset=utf-8' },
+            });
+          }
+          // ['', 'plan', <id>] or ['', 'plan', <id>, 'form', <kind>, <target>]
+          if (parts[1] === 'plan' && parts[2] !== undefined) {
+            if (parts.length === 3) {
+              const body = await page(parts[2]);
+              return body === undefined
+                ? html(`<p>No plan ${escapeHtml(parts[2])} in the log.</p>`, 404)
+                : html(body);
+            }
+            if (parts[3] === 'form' && parts[4] !== undefined && parts[5] !== undefined) {
+              return await form(parts[2], parts[4], parts[5], url.searchParams);
+            }
+          }
         }
-        if (request.method === 'POST' && url.pathname.startsWith('/api/')) {
+        if (request.method === 'POST' && parts[1] === 'api' && parts[2] !== undefined) {
           if (request.headers.get('x-yojana-token') !== token) {
-            return json(
-              { ok: false, code: 'FORBIDDEN', message: 'missing or wrong token; reload the page' },
-              403,
-            );
+            return html(errorFragment('This page is out of date; reload it.'), 403);
           }
-          let body: Json;
-          try {
-            body = (await request.json()) as Json;
-          } catch {
-            return json({ ok: false, code: 'BAD_REQUEST', message: 'expected a JSON body' }, 400);
-          }
-          return await api(url.pathname.slice('/api/'.length), body);
+          return await api(parts[2], await readFields(request));
         }
-        return json({ ok: false, code: 'NOT_FOUND', message: 'not found' }, 404);
+        return html(errorFragment('not found'), 404);
       } catch (error) {
-        return json({ ok: false, code: 'FAILED', message: String(error) }, 500);
+        return html(errorFragment(String(error)), 500);
       }
     },
   });

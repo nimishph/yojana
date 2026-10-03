@@ -1,12 +1,16 @@
 import {
   type Annotation,
+  type ChangeState,
   type ClaimResult,
+  type FoldState,
   foldLog,
   isAnnotationOutdated,
+  type PlanState,
+  type Requirement,
   type StorePort,
 } from '@cntxt-labs/yojana-core';
-import { LIVE_SCRIPT } from './review-live.ts';
-import type { StatusReport } from './status.ts';
+import { SELECTION_SCRIPT } from './review-live.ts';
+import type { PlanReport, StatusReport } from './status.ts';
 
 /**
  * Review: a plan rendered as one self-contained HTML page for reading and discussing. Markdown is
@@ -107,12 +111,68 @@ const OUTCOME_LABEL: Readonly<Record<ClaimResult['outcome'], string>> = {
   unverifiable: 'not checked',
 };
 
-function thread(
-  annotations: readonly Annotation[],
-  outdated: (a: Annotation) => boolean,
-  when: (a: Annotation) => string,
-  live = false,
-): string {
+/**
+ * Everything one review page is drawn from. Built once per request, so a full page and a single
+ * requirement (swapped in by htmx after an edit or a comment) come out of the same code.
+ */
+export interface ReviewContext {
+  readonly state: FoldState;
+  readonly plan: PlanState;
+  readonly report: PlanReport | undefined;
+  readonly checks: readonly ClaimResult[];
+  readonly atOf: ReadonlyMap<string, number>;
+  /** Present when served: the page can write, through htmx, with this token. */
+  readonly live: { readonly token: string; readonly checkedAt?: number | undefined } | undefined;
+}
+
+export interface ReviewOptions {
+  readonly store: StorePort;
+  readonly planId: string;
+  readonly status: StatusReport;
+  readonly checks?: readonly ClaimResult[] | undefined;
+  /** Served by `review --serve`: adds edit, suggest, comment, reply, accept and reject. */
+  readonly interactive?:
+    | { readonly token: string; readonly checkedAt?: number | undefined }
+    | undefined;
+}
+
+export async function reviewContext(options: ReviewOptions): Promise<ReviewContext | undefined> {
+  const events = await options.store.events();
+  const state = foldLog(events);
+  const plan = state.plans.get(options.planId);
+  if (plan === undefined) return undefined;
+  const atOf = new Map<string, number>();
+  for (const event of events) {
+    if (event.type === 'annotation-added') atOf.set(event.annotation.id, event.at);
+  }
+  return {
+    state,
+    plan,
+    report: options.status.plans.find((p) => p.planId === plan.id),
+    checks: options.checks ?? [],
+    atOf,
+    live: options.interactive,
+  };
+}
+
+function day(ms: number | undefined): string {
+  return ms === undefined
+    ? ''
+    : new Date(ms).toISOString().slice(0, 'yyyy-mm-ddThh:mm'.length).replace('T', ' ');
+}
+
+/** URL path segment for a plan id (`plan/x` -> `plan%2Fx`). */
+function planPath(planId: string): string {
+  return `/plan/${encodeURIComponent(planId)}`;
+}
+
+/** An element id for a requirement's or comment's form slot. */
+function slotId(key: string): string {
+  return `slot-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+}
+
+function thread(ctx: ReviewContext, annotations: readonly Annotation[]): string {
+  const outdated = (a: Annotation) => isAnnotationOutdated(ctx.state, ctx.plan.id, a);
   const replies = (id: string): Annotation[] => annotations.filter((a) => a.replyTo === id);
   const one = (a: Annotation, depth: number): string => {
     const badge = outdated(a)
@@ -122,10 +182,11 @@ function thread(
     const nested = replies(a.id)
       .map((r) => one(r, depth + 1))
       .join('');
-    const reply = live
-      ? ` <button type="button" class="link" data-act="reply" data-req="${escapeHtml(a.requirement)}" data-id="${escapeHtml(a.id)}">Reply</button>`
-      : '';
-    return `<li class="comment${depth > 0 ? ' reply' : ''}"><div class="who"><b>${escapeHtml(a.author)}</b> <span class="muted">${escapeHtml(when(a))} · ${escapeHtml(a.id)}</span> ${badge}${reply}</div>${quote}<p>${inline(a.body)}</p><div class="slot" data-slot="${escapeHtml(a.id)}"></div>${nested === '' ? '' : `<ul class="thread">${nested}</ul>`}</li>`;
+    const reply =
+      ctx.live === undefined
+        ? ''
+        : ` <button type="button" class="link" hx-get="${planPath(ctx.plan.id)}/form/reply/${encodeURIComponent(a.requirement)}?to=${encodeURIComponent(a.id)}" hx-target="#${slotId(a.id)}">Reply</button>`;
+    return `<li class="comment${depth > 0 ? ' reply' : ''}"><div class="who"><b>${escapeHtml(a.author)}</b> <span class="muted">${escapeHtml(day(ctx.atOf.get(a.id)))} · ${escapeHtml(a.id)}</span> ${badge}${reply}</div>${quote}<p>${inline(a.body)}</p><div id="${slotId(a.id)}"></div>${nested === '' ? '' : `<ul class="thread">${nested}</ul>`}</li>`;
   };
   const roots = annotations.filter(
     (a) => a.replyTo === undefined || !annotations.some((b) => b.id === a.replyTo),
@@ -135,76 +196,53 @@ function thread(
     : `<ul class="thread">${roots.map((a) => one(a, 0)).join('')}</ul>`;
 }
 
-export async function review(options: {
-  readonly store: StorePort;
-  readonly planId: string;
-  readonly status: StatusReport;
-  readonly checks?: readonly ClaimResult[] | undefined;
-  readonly generatedAt: number;
-  /** Served by `review --serve`: adds edit, suggest, comment, reply, accept and reject. */
-  readonly interactive?:
-    | { readonly token: string; readonly checkedAt?: number | undefined }
-    | undefined;
-}): Promise<string | undefined> {
-  const state = foldLog(await options.store.events());
-  const plan = state.plans.get(options.planId);
-  const live = options.interactive !== undefined;
-  if (plan === undefined) return undefined;
-  const report = options.status.plans.find((p) => p.planId === plan.id);
-  const atOf = new Map<string, number>();
-  for (const event of await options.store.events()) {
-    if (event.type === 'annotation-added') atOf.set(event.annotation.id, event.at);
-  }
-  const day = (ms: number | undefined) =>
-    ms === undefined
+/** One requirement, as a page section. Undefined when the plan has no such requirement. */
+export function renderSection(ctx: ReviewContext, requirementId: string): string | undefined {
+  const requirement = ctx.plan.heads.get(requirementId);
+  if (requirement === undefined) return undefined;
+  const notes = ctx.plan.annotations.filter((a) => a.requirement === requirement.id);
+  const current = notes.filter((a) => !isAnnotationOutdated(ctx.state, ctx.plan.id, a));
+  const highlights = current.flatMap((a) => (a.quote === undefined ? [] : [a.quote]));
+  const claims = ctx.checks.filter((c) => c.requirement === requirement.id);
+  const claimList =
+    requirement.claims.length === 0
+      ? '<p class="muted">No claims yet.</p>'
+      : `<ul class="claims">${requirement.claims
+          .map((claim, i) => {
+            const result = claims[i];
+            const pill =
+              result === undefined
+                ? ''
+                : `<span class="pill ${result.outcome}">${OUTCOME_LABEL[result.outcome]}</span>`;
+            const evidence =
+              result === undefined
+                ? ''
+                : `<div class="muted small">${escapeHtml(result.evidence)}</div>`;
+            const expectNone = claim.expect ? '' : ' <span class="muted">(expect none)</span>';
+            return `<li>${pill}<code>${escapeHtml(claim.kind)}</code> <code>${escapeHtml(claim.expression)}</code>${expectNone}${evidence}</li>`;
+          })
+          .join('')}</ul>`;
+  const alignment = ctx.report?.alignment.find((a) => a.requirement === requirement.id);
+  const work = (requirement.workItems ?? []).map((id) => {
+    const item = alignment?.items.find((i) => i.id === id);
+    return `<span class="pill ${item?.state === 'closed' ? 'holds' : 'neutral'}">${escapeHtml(id)}${item === undefined ? '' : ` · ${escapeHtml(item.state)}`}</span>`;
+  });
+  const flag =
+    alignment?.mismatch === 'claims-hold-work-open'
+      ? '<p class="flag">Every claim holds but the work item is still open. Close it?</p>'
+      : alignment?.mismatch === 'work-closed-claims-violated'
+        ? '<p class="flag bad">The work item is closed but a claim is violated. Reopen it?</p>'
+        : '';
+  const comments = thread(ctx, notes);
+  const rid = escapeHtml(requirement.id);
+  const base = `${planPath(ctx.plan.id)}/form`;
+  const slot = slotId(requirement.id);
+  const req = encodeURIComponent(requirement.id);
+  const actions =
+    ctx.live === undefined
       ? ''
-      : new Date(ms).toISOString().slice(0, 'yyyy-mm-ddThh:mm'.length).replace('T', ' ');
-
-  const sections = [...plan.heads.values()].map((requirement) => {
-    const notes = plan.annotations.filter((a) => a.requirement === requirement.id);
-    const current = notes.filter((a) => !isAnnotationOutdated(state, plan.id, a));
-    const highlights = current.flatMap((a) => (a.quote === undefined ? [] : [a.quote]));
-    const claims = (options.checks ?? []).filter((c) => c.requirement === requirement.id);
-    const claimList =
-      requirement.claims.length === 0
-        ? '<p class="muted">No claims yet.</p>'
-        : `<ul class="claims">${requirement.claims
-            .map((claim, i) => {
-              const result = claims[i];
-              const pill =
-                result === undefined
-                  ? ''
-                  : `<span class="pill ${result.outcome}">${OUTCOME_LABEL[result.outcome]}</span>`;
-              const evidence =
-                result === undefined
-                  ? ''
-                  : `<div class="muted small">${escapeHtml(result.evidence)}</div>`;
-              const expectNone = claim.expect ? '' : ' <span class="muted">(expect none)</span>';
-              return `<li>${pill}<code>${escapeHtml(claim.kind)}</code> <code>${escapeHtml(claim.expression)}</code>${expectNone}${evidence}</li>`;
-            })
-            .join('')}</ul>`;
-    const alignment = report?.alignment.find((a) => a.requirement === requirement.id);
-    const work = (requirement.workItems ?? []).map((id) => {
-      const item = alignment?.items.find((i) => i.id === id);
-      return `<span class="pill ${item?.state === 'closed' ? 'holds' : 'neutral'}">${escapeHtml(id)}${item === undefined ? '' : ` · ${escapeHtml(item.state)}`}</span>`;
-    });
-    const flag =
-      alignment?.mismatch === 'claims-hold-work-open'
-        ? '<p class="flag">Every claim holds but the work item is still open. Close it?</p>'
-        : alignment?.mismatch === 'work-closed-claims-violated'
-          ? '<p class="flag bad">The work item is closed but a claim is violated. Reopen it?</p>'
-          : '';
-    const comments = thread(
-      notes,
-      (a) => isAnnotationOutdated(state, plan.id, a),
-      (a) => day(atOf.get(a.id)),
-      live,
-    );
-    const rid = escapeHtml(requirement.id);
-    const actions = live
-      ? `<div class="actions"><button type="button" data-act="edit" data-req="${rid}">Edit</button><button type="button" data-act="suggest" data-req="${rid}">Suggest edit</button><button type="button" data-act="comment" data-req="${rid}">Comment</button></div><div class="slot" data-slot="${rid}"></div>`
-      : '';
-    return `<section class="req" id="${rid}">
+      : `<div class="actions"><button type="button" hx-get="${base}/edit/${req}" hx-target="#${slot}">Edit</button><button type="button" hx-get="${base}/suggest/${req}" hx-target="#${slot}">Suggest edit</button><button type="button" hx-get="${base}/comment/${req}" hx-target="#${slot}">Comment</button></div><div id="${slot}"></div>`;
+  return `<section class="req" id="${rid}">
   <header><h2>${inline(requirement.title)}</h2><a class="anchor" href="#${rid}">#${rid}</a></header>
   ${work.length > 0 ? `<div class="work">${work.join(' ')}</div>` : ''}
   ${flag}
@@ -213,75 +251,153 @@ export async function review(options: {
   ${actions}
   ${comments === '' ? '' : `<div class="comments"><h3>Comments</h3>${comments}</div>`}
 </section>`;
-  });
+}
 
-  // Open changes on this plan: what each would do, next to what the plan says now.
-  const openChanges = [...state.changes.values()].filter(
+function renderChanges(ctx: ReviewContext, openChanges: readonly ChangeState[]): string {
+  if (openChanges.length === 0) return '';
+  return `<section class="changes"><h2>Open changes</h2>${openChanges
+    .map((c) => {
+      const cid = escapeHtml(c.change.id);
+      const deltas = c.change.deltas
+        .map((d) => {
+          const id = d.op === 'remove' ? d.id : d.requirement.id;
+          const now = ctx.plan.heads.get(id);
+          const before =
+            now === undefined ? '<p class="muted">Not in the plan.</p>' : renderMarkdown(now.text);
+          const after =
+            d.op === 'remove'
+              ? '<p class="muted">Removed.</p>'
+              : `<p><b>${inline(d.requirement.title)}</b></p>${renderMarkdown(d.requirement.text)}`;
+          return `<div class="delta"><div class="muted small">${escapeHtml(d.op)} ${escapeHtml(id)}</div><div class="sides"><div><div class="label">now</div>${before}</div><div><div class="label">proposed</div>${after}</div></div></div>`;
+        })
+        .join('');
+      const slot = slotId(`change-${c.change.id}`);
+      const buttons =
+        ctx.live === undefined
+          ? ''
+          : `<div class="actions"><button type="button" class="primary" hx-post="/api/accept" hx-vals='${escapeHtml(JSON.stringify({ changeId: c.change.id }))}' hx-target="#${slot}">Accept</button><button type="button" hx-get="${planPath(ctx.plan.id)}/form/reject/${encodeURIComponent(c.change.id)}" hx-target="#${slot}">Reject</button></div><div id="${slot}"></div>`;
+      return `<article class="change"><header><b>${escapeHtml(c.change.title)}</b> <span class="muted small">${cid} · opened ${escapeHtml(day(c.openedAt))}</span></header>${deltas}${buttons}</article>`;
+    })
+    .join('')}</section>`;
+}
+
+// Forms. Each posts with htmx and, on success, the server answers with the updated section (or
+// asks for a reload); on failure it answers with the same form, the person's input kept, and why.
+
+function hidden(fields: Record<string, string>): string {
+  return Object.entries(fields)
+    .map(([name, value]) => `<input type="hidden" name="${name}" value="${escapeHtml(value)}">`)
+    .join('');
+}
+
+function errorLine(error: string | undefined): string {
+  return error === undefined ? '' : `<p class="error" role="alert">${escapeHtml(error)}</p>`;
+}
+
+const CANCEL = '<button type="button" onclick="this.closest(\'form\').remove()">Cancel</button>';
+
+export function editForm(options: {
+  readonly planId: string;
+  readonly requirement: Requirement;
+  readonly mode: 'edit' | 'suggest';
+  readonly values?: {
+    readonly title?: string | undefined;
+    readonly text?: string | undefined;
+    readonly why?: string | undefined;
+  };
+  readonly error?: string | undefined;
+}): string {
+  const { requirement, mode } = options;
+  const title = options.values?.title ?? requirement.title;
+  const text = options.values?.text ?? requirement.text;
+  const why =
+    mode === 'suggest'
+      ? `<label><span class="label">Why (optional)</span><textarea name="why" rows="3">${escapeHtml(options.values?.why ?? '')}</textarea></label>`
+      : '';
+  return `<form class="inline" hx-post="/api/${mode}" hx-swap="outerHTML">${hidden({ planId: options.planId, requirement: requirement.id, revision: requirement.revision })}<label><span class="label">Title</span><input name="title" value="${escapeHtml(title)}" required></label><label><span class="label">Text (Markdown)</span><textarea name="text">${escapeHtml(text)}</textarea></label>${why}${errorLine(options.error)}<div class="actions"><button class="primary">${mode === 'edit' ? 'Save to the plan' : 'Open as a change'}</button>${CANCEL}</div></form>`;
+}
+
+export function commentForm(options: {
+  readonly planId: string;
+  readonly requirementId: string;
+  readonly quote?: string | undefined;
+  readonly replyTo?: string | undefined;
+  readonly body?: string | undefined;
+  readonly error?: string | undefined;
+}): string {
+  const quote = options.quote ?? '';
+  const quoteField =
+    options.replyTo !== undefined
+      ? hidden({ replyTo: options.replyTo })
+      : `<label><span class="label">Quote (optional; selecting text in the requirement fills it)</span><input name="quote" value="${escapeHtml(quote)}"></label>`;
+  return `<form class="inline" hx-post="/api/comment" hx-swap="outerHTML">${hidden({ planId: options.planId, requirement: options.requirementId })}${quote !== '' && options.replyTo === undefined ? `<blockquote>${escapeHtml(quote)}</blockquote>` : ''}<label><span class="label">${options.replyTo === undefined ? 'Comment' : 'Reply'}</span><textarea name="body" rows="3" required>${escapeHtml(options.body ?? '')}</textarea></label>${quoteField}${errorLine(options.error)}<div class="actions"><button class="primary">${options.replyTo === undefined ? 'Comment' : 'Reply'}</button>${CANCEL}</div></form>`;
+}
+
+export function rejectForm(options: {
+  readonly changeId: string;
+  readonly error?: string | undefined;
+}): string {
+  return `<form class="inline" hx-post="/api/reject" hx-swap="outerHTML">${hidden({ changeId: options.changeId })}<label><span class="label">Why reject it?</span><input name="reason" required></label>${errorLine(options.error)}<div class="actions"><button class="primary">Reject</button>${CANCEL}</div></form>`;
+}
+
+export function errorFragment(message: string): string {
+  return errorLine(message);
+}
+
+/** htmx swaps 4xx answers too, so a refused form comes back in place with its reason. */
+const HTMX_CONFIG = JSON.stringify({
+  responseHandling: [
+    { code: '204', swap: false },
+    { code: '[23]..', swap: true },
+    { code: '4..', swap: true, error: false },
+    { code: '...', swap: false, error: true },
+  ],
+});
+
+export async function review(
+  options: ReviewOptions & { readonly generatedAt: number },
+): Promise<string | undefined> {
+  const ctx = await reviewContext(options);
+  if (ctx === undefined) return undefined;
+  const { plan, live } = ctx;
+  const sections = [...plan.heads.keys()].map((id) => renderSection(ctx, id) ?? '');
+  const openChanges = [...ctx.state.changes.values()].filter(
     (c) => c.status === 'open' && c.change.planId === plan.id,
   );
-  const changesHtml =
-    openChanges.length === 0
-      ? ''
-      : `<section class="changes"><h2>Open changes</h2>${openChanges
-          .map((c) => {
-            const cid = escapeHtml(c.change.id);
-            const deltas = c.change.deltas
-              .map((d) => {
-                const id = d.op === 'remove' ? d.id : d.requirement.id;
-                const now = plan.heads.get(id);
-                const before =
-                  now === undefined
-                    ? '<p class="muted">Not in the plan.</p>'
-                    : renderMarkdown(now.text);
-                const after =
-                  d.op === 'remove'
-                    ? '<p class="muted">Removed.</p>'
-                    : `<p><b>${inline(d.requirement.title)}</b></p>${renderMarkdown(d.requirement.text)}`;
-                return `<div class="delta"><div class="muted small">${escapeHtml(d.op)} ${escapeHtml(id)}</div><div class="sides"><div><div class="label">now</div>${before}</div><div><div class="label">proposed</div>${after}</div></div></div>`;
-              })
-              .join('');
-            const buttons = live
-              ? `<div class="actions"><button type="button" data-act="accept" data-change="${cid}">Accept</button><button type="button" data-act="reject" data-change="${cid}">Reject</button></div><div class="slot" data-slot="change:${cid}"></div>`
-              : '';
-            return `<article class="change"><header><b>${escapeHtml(c.change.title)}</b> <span class="muted small">${cid} · opened ${escapeHtml(day(c.openedAt))}</span></header>${deltas}${buttons}</article>`;
-          })
-          .join('')}</section>`;
 
-  // What the page needs to edit: each requirement as the log has it, and the token for writes.
-  const data = live
-    ? `<script type="application/json" id="yojana-data">${JSON.stringify({
-        planId: plan.id,
-        token: options.interactive?.token,
-        requirements: Object.fromEntries(
-          [...plan.heads.values()].map((r) => [
-            r.id,
-            { revision: r.revision, title: r.title, text: r.text },
-          ]),
-        ),
-      }).replace(/</g, '\\u003c')}</script>
-<div id="status" role="status" aria-live="polite" hidden></div>
-<script>${LIVE_SCRIPT}</script>`
-    : '';
-
-  const progress = report?.progress;
+  const progress = ctx.report?.progress;
   const progressText =
     progress === undefined || progress.error !== undefined
       ? ''
       : `<span>${progress.done}/${progress.total} work items done</span>`;
-  const checks = options.checks ?? [];
-  const tally = (o: ClaimResult['outcome']) => checks.filter((c) => c.outcome === o).length;
+  const tally = (o: ClaimResult['outcome']) => ctx.checks.filter((c) => c.outcome === o).length;
   const claimsText =
-    checks.length === 0
+    ctx.checks.length === 0
       ? '<span>claims not checked</span>'
       : `<span>${tally('holds')} hold · ${tally('violated')} violated · ${tally('unverifiable')} not checked</span>`;
-  const checkedAt = options.interactive?.checkedAt;
-  // Served pages cache claim results and bead states; this says how old they are and refreshes them.
-  const checkedNote = !live
-    ? ''
-    : `<div class="actions"><span class="muted small">${checkedAt === undefined ? 'beads cached by the server' : `claims checked ${escapeHtml(day(checkedAt))} UTC; beads cached`}</span><button type="button" data-act="recheck">Refresh checks and beads</button></div><div class="slot" data-slot="recheck"></div>`;
+  const checkedAt = live?.checkedAt;
+  const refresh =
+    live === undefined
+      ? ''
+      : `<div class="actions"><span class="muted small">${checkedAt === undefined ? 'beads cached by the server' : `claims checked ${escapeHtml(day(checkedAt))} UTC; beads cached`}</span><button type="button" hx-post="/api/check" hx-vals='${escapeHtml(JSON.stringify({ planId: plan.id }))}' hx-target="#slot-refresh" hx-indicator="#slot-refresh">Refresh checks and beads</button></div><div id="slot-refresh"><span class="htmx-indicator muted small">Refreshing; bd and anvesa can take a little while…</span></div>`;
   const outdatedCount = plan.annotations.filter((a) =>
-    isAnnotationOutdated(state, plan.id, a),
+    isAnnotationOutdated(ctx.state, plan.id, a),
   ).length;
+  const headExtras =
+    live === undefined
+      ? ''
+      : `<meta name="htmx-config" content="${escapeHtml(HTMX_CONFIG)}">
+<script src="/static/htmx.js"></script>`;
+  const bodyAttributes =
+    live === undefined
+      ? ''
+      : ` hx-headers='${escapeHtml(JSON.stringify({ 'x-yojana-token': live.token }))}' data-plan="${escapeHtml(plan.id)}"`;
+  const selection =
+    live === undefined
+      ? ''
+      : `<div id="selbar" hidden><button type="button" data-sel="comment">Comment</button><button type="button" data-sel="suggest">Suggest edit</button></div>
+<div id="selpop" hidden></div>
+<script>${SELECTION_SCRIPT}</script>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -289,8 +405,28 @@ export async function review(options: {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${escapeHtml(plan.id)} review</title>
+${headExtras}
 <style>
-:root { --bg:#f6f7f9; --surface:#fff; --ink:#1b2430; --muted:#5d6a78; --rule:#d9dfe6; --accent:#2f4f9e; --soft:#e7edf8; --ok:#2c7a4b; --bad:#b23a3a; --warn:#9a5a10; --mark:#fff1a8; color-scheme: light; }
+${STYLES}
+</style>
+</head>
+<body${bodyAttributes}>
+<main>
+  <div class="top">
+    <h1>${escapeHtml(plan.id)}</h1>
+    <div class="meta"><span>${escapeHtml(plan.status)}</span><span>${plan.heads.size} requirements</span>${progressText}${claimsText}<span>${plan.annotations.length} ${plan.annotations.length === 1 ? 'comment' : 'comments'}${outdatedCount > 0 ? ` (${outdatedCount} outdated)` : ''}</span>${openChanges.length > 0 ? `<span>${openChanges.length} open ${openChanges.length === 1 ? 'change' : 'changes'}</span>` : ''}<span>generated ${escapeHtml(day(options.generatedAt))} UTC</span>${live === undefined ? '' : '<span>live: edits save to the repository</span>'}</div>
+    ${refresh}
+  </div>
+${renderChanges(ctx, openChanges)}
+${sections.join('\n')}
+</main>
+${selection}
+</body>
+</html>
+`;
+}
+
+const STYLES = `:root { --bg:#f6f7f9; --surface:#fff; --ink:#1b2430; --muted:#5d6a78; --rule:#d9dfe6; --accent:#2f4f9e; --soft:#e7edf8; --ok:#2c7a4b; --bad:#b23a3a; --warn:#9a5a10; --mark:#fff1a8; color-scheme: light; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#12161c; --surface:#1a2029; --ink:#e3e8ee; --muted:#9aa7b4; --rule:#2c3540; --accent:#8fa9ec; --soft:#222c40; --ok:#6cc28f; --bad:#ec8a8a; --warn:#e0a15e; --mark:#5a4a12; color-scheme: dark; } }
 :root[data-theme="dark"] { --bg:#12161c; --surface:#1a2029; --ink:#e3e8ee; --muted:#9aa7b4; --rule:#2c3540; --accent:#8fa9ec; --soft:#222c40; --ok:#6cc28f; --bad:#ec8a8a; --warn:#e0a15e; --mark:#5a4a12; color-scheme: dark; }
 * { box-sizing: border-box; }
@@ -331,31 +467,21 @@ blockquote { margin:6px 0 0; padding-left:10px; border-left:3px solid var(--mark
 .sides { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:12px; }
 .sides > div { min-width:0; }
 .label { font:11.5px ui-monospace,Consolas,monospace; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
-.actions { display:flex; flex-wrap:wrap; gap:8px; }
+.actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 button { font:inherit; font-size:13.5px; padding:5px 12px; border-radius:6px; border:1px solid var(--rule); background:var(--surface); color:var(--ink); cursor:pointer; }
 button:hover { border-color:var(--accent); }
 button:focus-visible, textarea:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 button.primary { background:var(--accent); border-color:var(--accent); color:var(--surface); }
 button.link { border:0; padding:0 4px; background:none; color:var(--accent); font-size:12.5px; }
 form.inline { display:grid; gap:8px; margin-top:8px; }
+form.inline label { display:grid; gap:4px; }
 form.inline textarea, form.inline input { font:13.5px/1.5 ui-monospace,Consolas,monospace; width:100%; padding:8px 10px; border:1px solid var(--rule); border-radius:6px; background:var(--bg); color:var(--ink); }
-form.inline textarea { min-height:140px; resize:vertical; }
-#status { position:fixed; left:16px; right:16px; bottom:calc(16px + env(safe-area-inset-bottom, 0px)); max-width:780px; margin:0 auto; padding:10px 14px; border-radius:8px; background:var(--ink); color:var(--bg); font-size:14px; }
-#status.error { background:var(--bad); color:#fff; }
-</style>
-</head>
-<body>
-<main>
-  <div class="top">
-    <h1>${escapeHtml(plan.id)}</h1>
-    <div class="meta"><span>${escapeHtml(plan.status)}</span><span>${plan.heads.size} requirements</span>${progressText}${claimsText}<span>${plan.annotations.length} ${plan.annotations.length === 1 ? 'comment' : 'comments'}${outdatedCount > 0 ? ` (${outdatedCount} outdated)` : ''}</span>${openChanges.length > 0 ? `<span>${openChanges.length} open ${openChanges.length === 1 ? 'change' : 'changes'}</span>` : ''}<span>generated ${escapeHtml(day(options.generatedAt))} UTC</span>${live ? '<span>live: edits save to the repository</span>' : ''}</div>
-    ${checkedNote}
-  </div>
-${changesHtml}
-${sections.join('\n')}
-</main>
-${data}
-</body>
-</html>
-`;
-}
+form.inline textarea[name="text"] { min-height:160px; resize:vertical; }
+.error { margin:0; padding:8px 12px; border-left:3px solid var(--bad); background:var(--soft); border-radius:0 6px 6px 0; white-space:pre-wrap; }
+.htmx-indicator { display:none; }
+.htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display:inline; }
+#selbar { position:absolute; z-index:10; display:flex; gap:4px; padding:4px; background:var(--ink); border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,.2); }
+#selbar[hidden], #selpop[hidden] { display:none; }
+#selbar button { background:transparent; border:0; color:var(--bg); padding:4px 10px; }
+#selbar button:hover { background:color-mix(in srgb, var(--bg) 18%, transparent); }
+#selpop { position:absolute; z-index:10; width:min(420px, calc(100vw - 32px)); background:var(--surface); border:1px solid var(--accent); border-radius:8px; padding:4px 14px 14px; box-shadow:0 8px 24px rgba(0,0,0,.18); }`;

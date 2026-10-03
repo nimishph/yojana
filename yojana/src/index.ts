@@ -29,7 +29,18 @@ export {
 } from './ingest.ts';
 export { type ItemProgress, type PlanProgress, progress } from './progress.ts';
 export { type RefreshedFile, type RefreshReport, refresh } from './refresh.ts';
-export { escapeHtml, renderMarkdown, review } from './review.ts';
+export {
+  commentForm,
+  editForm,
+  errorFragment,
+  escapeHtml,
+  type ReviewContext,
+  rejectForm,
+  renderMarkdown,
+  renderSection,
+  review,
+  reviewContext,
+} from './review.ts';
 export {
   type FileState,
   type OpenChange,

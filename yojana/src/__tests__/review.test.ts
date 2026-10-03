@@ -135,3 +135,15 @@ describe('review page', () => {
     ).toBeUndefined();
   });
 });
+
+describe('quotes selected on the rendered page', () => {
+  test('match despite lost Markdown marks and line breaks, but a made-up quote is refused', async () => {
+    const { store } = await setup();
+    const run = (quote: string) =>
+      comment({ store, planId: 'plan/r', requirement: 'safe', body: 'x', author: 'a', quote });
+    // The page shows `code` without backticks; the selection carries none.
+    expect((await run('and keep code')).ok).toBe(true);
+    expect((await run('keep   code.')).ok).toBe(true);
+    expect(await run('keep the code')).toMatchObject({ ok: false, code: 'QUOTE_NOT_FOUND' });
+  });
+});
