@@ -18,16 +18,24 @@ export {
 export {
   type Annotation,
   type Change,
+  type ChangeDraft,
   type Claim,
   type Delta,
+  type DeltaDraft,
   PLAN_STATUSES,
   type Plan,
   type PlanPart,
   type PlanStatus,
   type Requirement,
 } from './model.ts';
-export type { ParseIssue, ParseResult, ParserPort } from './parser-port.ts';
+export type {
+  ChangeParseResult,
+  ParseIssue,
+  ParseResult,
+  ParserPort,
+} from './parser-port.ts';
 export {
+  assertChangeId,
   assertRequirementId,
   normalizeContent,
   type RequirementId,

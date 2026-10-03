@@ -186,3 +186,36 @@ describe('parsePlan: issues', () => {
     ]);
   });
 });
+
+describe('renderPlan: claim values', () => {
+  const withExpression = (expression: string): Plan => ({
+    id: 'plan/x',
+    title: 'x',
+    status: 'draft',
+    workItems: [],
+    parts: [{ kind: 'requirement', id: 'a' }],
+    source: 'p.md',
+    requirements: [
+      {
+        id: 'a',
+        title: 'a',
+        text: 't',
+        revision: 'r_0',
+        claims: [{ kind: 'wql', expression, expect: true }],
+      },
+    ],
+  });
+
+  test('stays plain when YAML reads it back unchanged', () => {
+    const text = renderPlan(withExpression('//file[@path=".claude-plugin/plugin.json"]'));
+    expect(text).toContain('expression: //file[@path=".claude-plugin/plugin.json"]\n');
+  });
+
+  test.each(['true', '123', 'a: b', 'x # y', "it's", '[list]', '- dash', '  padded'])(
+    'quotes %p and reads it back exactly',
+    (expression) => {
+      const parsed = ok(parsePlan('p.md', renderPlan(withExpression(expression))));
+      expect(parsed.requirements[0]?.claims[0]?.expression).toBe(expression.trim());
+    },
+  );
+});

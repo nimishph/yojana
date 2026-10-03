@@ -71,6 +71,25 @@ export interface Change {
   readonly planId: string;
   readonly title: string;
   readonly deltas: readonly Delta[];
+  /** The change file it was opened from, when there was one. */
+  readonly source?: string | undefined;
+}
+
+/**
+ * A change as written in a change file: what it does, before it is opened. Opening pins every
+ * modify and remove to the requirement's revision in the log at that moment, making it a Change.
+ */
+export type DeltaDraft =
+  | { readonly op: 'add'; readonly requirement: Requirement }
+  | { readonly op: 'modify'; readonly requirement: Requirement }
+  | { readonly op: 'remove'; readonly id: RequirementId };
+
+export interface ChangeDraft {
+  readonly id: string;
+  readonly planId: string;
+  readonly title: string;
+  readonly deltas: readonly DeltaDraft[];
+  readonly source: string;
 }
 
 /**

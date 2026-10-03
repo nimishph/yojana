@@ -21,6 +21,16 @@ export function assertRequirementId(id: string): RequirementId {
   return id;
 }
 
+const CHANGE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/** Change ids name a file and an archive entry, so they follow the same kebab-case rule. */
+export function assertChangeId(id: string): string {
+  if (!CHANGE_ID.test(id)) {
+    throw new InvalidArgumentError('change id', 'lowercase kebab-case, 1-64 chars', id);
+  }
+  return id;
+}
+
 /**
  * Normalise text before hashing: line endings, trailing whitespace and surrounding blank lines
  * do not change meaning, so they do not change the revision.

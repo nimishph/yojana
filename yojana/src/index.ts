@@ -2,6 +2,17 @@
 export const VERSION = '0.0.0';
 
 export {
+  type AbandonResult,
+  type ArchiveResult,
+  abandonChange,
+  applyChange,
+  archiveChange,
+  type ChangeProblem,
+  type OpenChangeResult,
+  openChange,
+  type PlanFileUpdate,
+} from './changes.ts';
+export {
   type FileReport,
   type IngestOptions,
   type IngestReport,
@@ -12,4 +23,4 @@ export {
   type RequirementOutcome,
   type StatusOutcome,
 } from './ingest.ts';
-export { loadPlanFiles, openWorkspace, type Workspace } from './workspace.ts';
+export { loadPlanFiles, openWorkspace, settleChangeFile, type Workspace } from './workspace.ts';

@@ -1,13 +1,20 @@
 import type { Claim, Plan, Requirement } from '@cntxt-labs/yojana-core';
 
-const PLAIN_SCALAR = /^[A-Za-z0-9/][A-Za-z0-9 ._/()-]*$/;
-const YAML_KEYWORD = /^(true|false|null|yes|no|on|off|~|[-+]?[\d._]+)$/i;
-
-/** A YAML scalar that reads back as the same string: plain when safe, quoted otherwise. */
+/**
+ * A YAML scalar that reads back as the same string. Plain whenever the YAML parser gives the value
+ * back unchanged (so `//file[@path="x"]` stays as its author wrote it), quoted otherwise.
+ */
 function yamlString(value: string): string {
   if (value.includes('\n')) return JSON.stringify(value);
-  if (PLAIN_SCALAR.test(value) && !YAML_KEYWORD.test(value) && !value.endsWith(' ')) return value;
-  return `'${value.replaceAll("'", "''")}'`;
+  const quoted = `'${value.replaceAll("'", "''")}'`;
+  if (value === '' || value !== value.trim()) return quoted;
+  try {
+    const back: unknown = Bun.YAML.parse(`v: ${value}`);
+    const plainWorks = typeof back === 'object' && back !== null && 'v' in back && back.v === value;
+    return plainWorks ? value : quoted;
+  } catch {
+    return quoted;
+  }
 }
 
 function renderClaim(claim: Claim): string {
