@@ -5,7 +5,7 @@ import { renderPlan } from './render.ts';
 
 export { parseChange } from './change.ts';
 export { parsePlan } from './parse.ts';
-export { renderPlan } from './render.ts';
+export { renderChange, renderPlan } from './render.ts';
 
 /** ParserPort adapter for Markdown plans and changes. The format is described in document.ts. */
 export class MarkdownParser implements ParserPort {

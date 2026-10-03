@@ -30,6 +30,7 @@ import {
 import { foldLog, type VerifierPort, YojanaError } from '@cntxt-labs/yojana-core';
 import { AnvesaVerifier, PathVerifier, spawnAnvesa, TextVerifier } from '@cntxt-labs/yojana-verify';
 import { BdWorkLink, spawnBd } from '@cntxt-labs/yojana-work';
+import { startReviewServer } from './serve.ts';
 
 const USAGE = `yojana ${VERSION}: plans as checkable contracts
 
@@ -44,6 +45,7 @@ Usage:
   yojana repair                             keep a corrupt log's readable events, move the rest aside
   yojana comment <plan> <req> "<text>"      note on a requirement [--quote "<span>"] [--reply <id>]
   yojana review [plan] [--check] [--out f]  write an HTML review page (.yojana/review/<plan>.html)
+  yojana review --serve [--port n]          the review page, live: comment, edit, suggest, accept
   yojana import <file> --id <plan-id>       start a plan from an existing Markdown roadmap
                 [--prefix <bead-prefix>] [--out <path>] [--force]
   yojana check [plan] [--strict]            verify plan claims against the code
@@ -71,6 +73,11 @@ type Write = (text: string) => void;
 /** An open change older than this many days is reported stale; --stale-days overrides it. */
 const DEFAULT_STALE_DAYS = 14;
 
+/** Port for review --serve; --port overrides it, and 0 picks a free one. */
+const DEFAULT_PORT = 4317;
+/** Highest TCP port number. */
+const MAX_PORT = 65535;
+
 interface Flags {
   readonly root: string;
   readonly plans: string | undefined;
@@ -88,6 +95,8 @@ interface Flags {
   readonly force: boolean;
   readonly quote: string | undefined;
   readonly reply: string | undefined;
+  readonly serve: boolean;
+  readonly port: number;
   readonly positional: readonly string[];
 }
 
@@ -109,6 +118,8 @@ function parseFlags(argv: readonly string[]): Flags {
     force: false,
     quote: undefined as string | undefined,
     reply: undefined as string | undefined,
+    serve: false,
+    port: DEFAULT_PORT,
     positional: [] as string[],
   };
   for (let i = 0; i < argv.length; i++) {
@@ -128,7 +139,14 @@ function parseFlags(argv: readonly string[]): Flags {
     else if (arg === '--force') flags.force = true;
     else if (arg === '--quote') flags.quote = value();
     else if (arg === '--reply') flags.reply = value();
-    else if (arg === '--json') flags.json = true;
+    else if (arg === '--serve') flags.serve = true;
+    else if (arg === '--port') {
+      const port = Number(value());
+      if (!Number.isInteger(port) || port < 0 || port > MAX_PORT) {
+        throw new YojanaError('CLI_USAGE', '--port needs a port number');
+      }
+      flags.port = port;
+    } else if (arg === '--json') flags.json = true;
     else if (arg === '--trust-file') flags.trustFile = true;
     else if (arg === '--all') flags.all = true;
     else if (arg === '--strict') flags.strict = true;
@@ -445,7 +463,25 @@ function runComment(flags: Flags, write: Write): Promise<number> {
 
 // review
 
+async function runServe(flags: Flags, write: Write): Promise<number> {
+  const server = startReviewServer({
+    root: flags.root,
+    plansDir: flags.plans,
+    changesDir: flags.changes,
+    port: flags.port,
+    actor: actor(),
+    runCheck: flags.runCheck,
+    verifiers: () => verifiers(flags.root),
+    worklink: () => new BdWorkLink(spawnBd(process.env.BD_BIN ?? 'bd', flags.root)),
+  });
+  write(`review server on ${server.url} (this machine only); stop it with Ctrl+C\n`);
+  // Serves until the process is stopped.
+  await new Promise<never>(() => undefined);
+  return 0;
+}
+
 function runReview(flags: Flags, write: Write): Promise<number> {
+  if (flags.serve) return runServe(flags, write);
   return withWorkspace(flags, async (ws) => {
     const state = foldLog(await ws.store.events());
     const [named] = flags.positional;

@@ -5,6 +5,7 @@ import {
   isAnnotationOutdated,
   type StorePort,
 } from '@cntxt-labs/yojana-core';
+import { LIVE_SCRIPT } from './review-live.ts';
 import type { StatusReport } from './status.ts';
 
 /**
@@ -110,6 +111,7 @@ function thread(
   annotations: readonly Annotation[],
   outdated: (a: Annotation) => boolean,
   when: (a: Annotation) => string,
+  live = false,
 ): string {
   const replies = (id: string): Annotation[] => annotations.filter((a) => a.replyTo === id);
   const one = (a: Annotation, depth: number): string => {
@@ -120,7 +122,10 @@ function thread(
     const nested = replies(a.id)
       .map((r) => one(r, depth + 1))
       .join('');
-    return `<li class="comment${depth > 0 ? ' reply' : ''}"><div class="who"><b>${escapeHtml(a.author)}</b> <span class="muted">${escapeHtml(when(a))} · ${escapeHtml(a.id)}</span> ${badge}</div>${quote}<p>${inline(a.body)}</p>${nested === '' ? '' : `<ul class="thread">${nested}</ul>`}</li>`;
+    const reply = live
+      ? ` <button type="button" class="link" data-act="reply" data-req="${escapeHtml(a.requirement)}" data-id="${escapeHtml(a.id)}">Reply</button>`
+      : '';
+    return `<li class="comment${depth > 0 ? ' reply' : ''}"><div class="who"><b>${escapeHtml(a.author)}</b> <span class="muted">${escapeHtml(when(a))} · ${escapeHtml(a.id)}</span> ${badge}${reply}</div>${quote}<p>${inline(a.body)}</p><div class="slot" data-slot="${escapeHtml(a.id)}"></div>${nested === '' ? '' : `<ul class="thread">${nested}</ul>`}</li>`;
   };
   const roots = annotations.filter(
     (a) => a.replyTo === undefined || !annotations.some((b) => b.id === a.replyTo),
@@ -136,9 +141,14 @@ export async function review(options: {
   readonly status: StatusReport;
   readonly checks?: readonly ClaimResult[] | undefined;
   readonly generatedAt: number;
+  /** Served by `review --serve`: adds edit, suggest, comment, reply, accept and reject. */
+  readonly interactive?:
+    | { readonly token: string; readonly checkedAt?: number | undefined }
+    | undefined;
 }): Promise<string | undefined> {
   const state = foldLog(await options.store.events());
   const plan = state.plans.get(options.planId);
+  const live = options.interactive !== undefined;
   if (plan === undefined) return undefined;
   const report = options.status.plans.find((p) => p.planId === plan.id);
   const atOf = new Map<string, number>();
@@ -188,16 +198,70 @@ export async function review(options: {
       notes,
       (a) => isAnnotationOutdated(state, plan.id, a),
       (a) => day(atOf.get(a.id)),
+      live,
     );
-    return `<section class="req" id="${escapeHtml(requirement.id)}">
-  <header><h2>${inline(requirement.title)}</h2><a class="anchor" href="#${escapeHtml(requirement.id)}">#${escapeHtml(requirement.id)}</a></header>
+    const rid = escapeHtml(requirement.id);
+    const actions = live
+      ? `<div class="actions"><button type="button" data-act="edit" data-req="${rid}">Edit</button><button type="button" data-act="suggest" data-req="${rid}">Suggest edit</button><button type="button" data-act="comment" data-req="${rid}">Comment</button></div><div class="slot" data-slot="${rid}"></div>`
+      : '';
+    return `<section class="req" id="${rid}">
+  <header><h2>${inline(requirement.title)}</h2><a class="anchor" href="#${rid}">#${rid}</a></header>
   ${work.length > 0 ? `<div class="work">${work.join(' ')}</div>` : ''}
   ${flag}
-  <div class="text">${renderMarkdown(requirement.text, highlights) || '<p class="muted">No text.</p>'}</div>
+  <div class="text" data-req="${rid}">${renderMarkdown(requirement.text, highlights) || '<p class="muted">No text.</p>'}</div>
   ${claimList}
+  ${actions}
   ${comments === '' ? '' : `<div class="comments"><h3>Comments</h3>${comments}</div>`}
 </section>`;
   });
+
+  // Open changes on this plan: what each would do, next to what the plan says now.
+  const openChanges = [...state.changes.values()].filter(
+    (c) => c.status === 'open' && c.change.planId === plan.id,
+  );
+  const changesHtml =
+    openChanges.length === 0
+      ? ''
+      : `<section class="changes"><h2>Open changes</h2>${openChanges
+          .map((c) => {
+            const cid = escapeHtml(c.change.id);
+            const deltas = c.change.deltas
+              .map((d) => {
+                const id = d.op === 'remove' ? d.id : d.requirement.id;
+                const now = plan.heads.get(id);
+                const before =
+                  now === undefined
+                    ? '<p class="muted">Not in the plan.</p>'
+                    : renderMarkdown(now.text);
+                const after =
+                  d.op === 'remove'
+                    ? '<p class="muted">Removed.</p>'
+                    : `<p><b>${inline(d.requirement.title)}</b></p>${renderMarkdown(d.requirement.text)}`;
+                return `<div class="delta"><div class="muted small">${escapeHtml(d.op)} ${escapeHtml(id)}</div><div class="sides"><div><div class="label">now</div>${before}</div><div><div class="label">proposed</div>${after}</div></div></div>`;
+              })
+              .join('');
+            const buttons = live
+              ? `<div class="actions"><button type="button" data-act="accept" data-change="${cid}">Accept</button><button type="button" data-act="reject" data-change="${cid}">Reject</button></div><div class="slot" data-slot="change:${cid}"></div>`
+              : '';
+            return `<article class="change"><header><b>${escapeHtml(c.change.title)}</b> <span class="muted small">${cid} · opened ${escapeHtml(day(c.openedAt))}</span></header>${deltas}${buttons}</article>`;
+          })
+          .join('')}</section>`;
+
+  // What the page needs to edit: each requirement as the log has it, and the token for writes.
+  const data = live
+    ? `<script type="application/json" id="yojana-data">${JSON.stringify({
+        planId: plan.id,
+        token: options.interactive?.token,
+        requirements: Object.fromEntries(
+          [...plan.heads.values()].map((r) => [
+            r.id,
+            { revision: r.revision, title: r.title, text: r.text },
+          ]),
+        ),
+      }).replace(/</g, '\\u003c')}</script>
+<div id="status" role="status" aria-live="polite" hidden></div>
+<script>${LIVE_SCRIPT}</script>`
+    : '';
 
   const progress = report?.progress;
   const progressText =
@@ -210,6 +274,11 @@ export async function review(options: {
     checks.length === 0
       ? '<span>claims not checked</span>'
       : `<span>${tally('holds')} hold · ${tally('violated')} violated · ${tally('unverifiable')} not checked</span>`;
+  const checkedAt = options.interactive?.checkedAt;
+  // Served pages cache claim results and bead states; this says how old they are and refreshes them.
+  const checkedNote = !live
+    ? ''
+    : `<div class="actions"><span class="muted small">${checkedAt === undefined ? 'beads cached by the server' : `claims checked ${escapeHtml(day(checkedAt))} UTC; beads cached`}</span><button type="button" data-act="recheck">Refresh checks and beads</button></div><div class="slot" data-slot="recheck"></div>`;
   const outdatedCount = plan.annotations.filter((a) =>
     isAnnotationOutdated(state, plan.id, a),
   ).length;
@@ -256,16 +325,36 @@ mark { background:var(--mark); color:inherit; padding:0 2px; border-radius:2px; 
 blockquote { margin:6px 0 0; padding-left:10px; border-left:3px solid var(--mark); color:var(--muted); }
 .muted { color:var(--muted); }
 .small { font-size:12.5px; overflow-wrap:anywhere; }
+.changes { display:grid; gap:12px; }
+.changes h2 { margin:0; font-size:19px; }
+.change { background:var(--surface); border:1px solid var(--accent); border-radius:8px; padding:14px 18px; display:grid; gap:10px; }
+.sides { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:12px; }
+.sides > div { min-width:0; }
+.label { font:11.5px ui-monospace,Consolas,monospace; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+.actions { display:flex; flex-wrap:wrap; gap:8px; }
+button { font:inherit; font-size:13.5px; padding:5px 12px; border-radius:6px; border:1px solid var(--rule); background:var(--surface); color:var(--ink); cursor:pointer; }
+button:hover { border-color:var(--accent); }
+button:focus-visible, textarea:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+button.primary { background:var(--accent); border-color:var(--accent); color:var(--surface); }
+button.link { border:0; padding:0 4px; background:none; color:var(--accent); font-size:12.5px; }
+form.inline { display:grid; gap:8px; margin-top:8px; }
+form.inline textarea, form.inline input { font:13.5px/1.5 ui-monospace,Consolas,monospace; width:100%; padding:8px 10px; border:1px solid var(--rule); border-radius:6px; background:var(--bg); color:var(--ink); }
+form.inline textarea { min-height:140px; resize:vertical; }
+#status { position:fixed; left:16px; right:16px; bottom:calc(16px + env(safe-area-inset-bottom, 0px)); max-width:780px; margin:0 auto; padding:10px 14px; border-radius:8px; background:var(--ink); color:var(--bg); font-size:14px; }
+#status.error { background:var(--bad); color:#fff; }
 </style>
 </head>
 <body>
 <main>
   <div class="top">
     <h1>${escapeHtml(plan.id)}</h1>
-    <div class="meta"><span>${escapeHtml(plan.status)}</span><span>${plan.heads.size} requirements</span>${progressText}${claimsText}<span>${plan.annotations.length} ${plan.annotations.length === 1 ? 'comment' : 'comments'}${outdatedCount > 0 ? ` (${outdatedCount} outdated)` : ''}</span><span>generated ${escapeHtml(day(options.generatedAt))} UTC</span></div>
+    <div class="meta"><span>${escapeHtml(plan.status)}</span><span>${plan.heads.size} requirements</span>${progressText}${claimsText}<span>${plan.annotations.length} ${plan.annotations.length === 1 ? 'comment' : 'comments'}${outdatedCount > 0 ? ` (${outdatedCount} outdated)` : ''}</span>${openChanges.length > 0 ? `<span>${openChanges.length} open ${openChanges.length === 1 ? 'change' : 'changes'}</span>` : ''}<span>generated ${escapeHtml(day(options.generatedAt))} UTC</span>${live ? '<span>live: edits save to the repository</span>' : ''}</div>
+    ${checkedNote}
   </div>
+${changesHtml}
 ${sections.join('\n')}
 </main>
+${data}
 </body>
 </html>
 `;

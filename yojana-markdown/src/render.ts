@@ -1,4 +1,4 @@
-import type { Claim, Plan, Requirement } from '@cntxt-labs/yojana-core';
+import type { ChangeDraft, Claim, Plan, Requirement } from '@cntxt-labs/yojana-core';
 
 /**
  * A YAML scalar that reads back as the same string. Plain whenever the YAML parser gives the value
@@ -28,10 +28,10 @@ function renderClaim(claim: Claim): string {
   ].join('\n');
 }
 
-function renderRequirement(requirement: Requirement): string {
+function renderRequirement(requirement: Requirement, marker = ''): string {
   const work = requirement.workItems ?? [];
   const links = work.length > 0 ? ` beads=${work.join(',')}` : '';
-  const blocks = [`## Requirement: ${requirement.title} {#${requirement.id}${links}}`];
+  const blocks = [`## ${marker}Requirement: ${requirement.title} {#${requirement.id}${links}}`];
   if (requirement.text !== '') blocks.push(requirement.text);
   for (const claim of requirement.claims) blocks.push(renderClaim(claim));
   return blocks.join('\n\n');
@@ -62,6 +62,27 @@ export function renderPlan(plan: Plan): string {
   const placed = new Set(plan.parts.flatMap((p) => (p.kind === 'requirement' ? [p.id] : [])));
   for (const requirement of plan.requirements) {
     if (!placed.has(requirement.id)) blocks.push(renderRequirement(requirement));
+  }
+  return `${blocks.join('\n\n')}\n`;
+}
+
+/** Render a change file in the format that `parseChange` reads. */
+export function renderChange(change: ChangeDraft, why?: string): string {
+  const frontmatter = [
+    '---',
+    `id: ${yamlString(change.id)}`,
+    `plan: ${yamlString(change.planId)}`,
+    `title: ${yamlString(change.title)}`,
+    '---',
+  ].join('\n');
+  const blocks = [frontmatter];
+  if (why !== undefined && why.trim() !== '') blocks.push(why.trim());
+  for (const delta of change.deltas) {
+    if (delta.op === 'remove') blocks.push(`## REMOVED Requirement: ${delta.id} {#${delta.id}}`);
+    else
+      blocks.push(
+        renderRequirement(delta.requirement, delta.op === 'add' ? 'ADDED ' : 'MODIFIED '),
+      );
   }
   return `${blocks.join('\n\n')}\n`;
 }

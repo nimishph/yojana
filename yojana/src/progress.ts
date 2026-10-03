@@ -42,24 +42,23 @@ export async function progress(options: {
       result.push(failed(lookup.error));
       continue;
     }
-    const items: ItemProgress[] = [];
-    let error: string | undefined;
-    for (const item of lookup.items) {
-      if (item.state === 'missing') {
-        items.push({ item, children: [] });
-        continue;
-      }
-      const children = await options.worklink.children(item.id);
-      if (!children.ok) {
-        error = children.error;
-        break;
-      }
-      items.push({ item, children: children.items });
-    }
-    if (error !== undefined) {
-      result.push(failed(error));
+    // Children are asked for all at once: a tracker like bd takes seconds per call to start.
+    const lookups = await Promise.all(
+      lookup.items.map(async (item) =>
+        item.state === 'missing'
+          ? { item, children: { ok: true as const, items: [] } }
+          : { item, children: await options.worklink.children(item.id) },
+      ),
+    );
+    const failure = lookups.find((l) => !l.children.ok);
+    if (failure !== undefined && !failure.children.ok) {
+      result.push(failed(failure.children.error));
       continue;
     }
+    const items: ItemProgress[] = lookups.map(({ item, children }) => ({
+      item,
+      children: children.ok ? children.items : [],
+    }));
 
     const counted = items.flatMap((p) => (p.children.length > 0 ? p.children : [p.item]));
     result.push({

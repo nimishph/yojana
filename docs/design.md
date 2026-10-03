@@ -197,8 +197,22 @@ the text and is highlighted on the page. When the requirement gets a new revisio
 marked outdated and the highlight is dropped, rather than the comment disappearing or attaching to
 text it was not about. Plan text is escaped on the page; it is data, never markup.
 
-Comments are added from the CLI for now. Commenting from inside the page needs something to write
-the event back, such as a local `review --serve`; that is a later step.
+`yojana review --serve [--check] [--port n]` serves the same page live, on 127.0.0.1 only, with
+two edit modes and the comment threads:
+
+- **Edit** rewrites one requirement in the plan file and ingests it. It is refused when the
+  requirement changed since the page loaded (the reply carries the current text) or the file has
+  edits not yet ingested, and new text that would reshape the plan (a `## ` heading) is refused.
+- **Suggest edit** writes and opens a change file pinned to the revision on screen; **Accept**
+  archives it (same conflict check), **Reject** abandons it with a reason.
+- **Comment** and **Reply**; text selected in a requirement becomes the quote.
+
+Writes go through the engine one at a time on a log reopened per request, so the CLI can be used
+alongside, and need the page's per-run token and this server's Host, so other websites cannot post
+to it. Claim results and bead states are cached (bd and anvesa take seconds per call) and refreshed
+from the page.
+
+The page itself is plain HTML and about 150 lines of dependency-free JavaScript; no framework.
 
 ## Commands
 
@@ -214,6 +228,7 @@ yojana check [plan] [--strict]            verify claims against the code
 yojana repair                             recover a corrupt log
 yojana comment <plan> <req> "<text>"      note on a requirement (--quote, --reply)
 yojana review [plan] [--check]            HTML review page in .yojana/review/
+yojana review --serve [--check]           the same page, live: edit, suggest, accept, comment
 yojana import <file> --id <plan-id>       start a plan from an existing Markdown roadmap
 ```
 
@@ -234,5 +249,5 @@ changes, claim checks through anvesa, progress from bd, status, refresh and repa
 Dogfooding anvesa's own roadmap found that 7 of its 8 claims already hold in the code while all 7
 beads were still open. All three follow-ups from that run are built: `text` claims, requirement links
 that make status say "close?" for each such bead (six on anvesa's roadmap), and `import`. The review page is
-built too (comments from the CLI). Later: commenting from the page itself, OpenSpec import/export, git-ref and Dolt sync, a medha rule sink,
+built too, and `review --serve` makes it live. Later: OpenSpec import/export, git-ref and Dolt sync, a medha rule sink,
 and a Claude Code plugin.
