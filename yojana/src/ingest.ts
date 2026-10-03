@@ -81,6 +81,8 @@ export interface FileReport {
   readonly status: StatusOutcome | undefined;
   /** True when the plan had no base and the log already knew it (see `trustFile`). */
   readonly missingBase: boolean;
+  /** The file's bead list differs from the log's (recorded, or would be in a dry run). */
+  readonly workItemsChanged: boolean;
   readonly appended: number;
 }
 
@@ -187,6 +189,7 @@ export async function ingest(options: IngestOptions): Promise<IngestReport> {
         requirements: outcomes,
         status,
         missingBase,
+        workItemsChanged: false,
         appended: 0,
       });
       continue;
@@ -239,6 +242,7 @@ export async function ingest(options: IngestOptions): Promise<IngestReport> {
       requirements: outcomes,
       status,
       missingBase,
+      workItemsChanged: workChanged,
       appended: options.dryRun === true ? 0 : events.length,
     });
   }
@@ -259,6 +263,7 @@ function invalid(
     requirements: [],
     status: undefined,
     missingBase: false,
+    workItemsChanged: false,
     appended: 0,
   };
 }

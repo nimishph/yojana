@@ -34,6 +34,8 @@ export type FileState =
       readonly conflicts: readonly RequirementId[];
       /** The status line in the file differs from the log in a way ingest would record. */
       readonly statusUnrecorded: boolean;
+      /** The file's bead list differs from the log's. */
+      readonly workItemsUnrecorded: boolean;
     }
   | { readonly kind: 'none' };
 
@@ -110,6 +112,7 @@ export async function status(options: {
       behind: ids('behind'),
       conflicts: ids('conflict'),
       statusUnrecorded: report.status?.movement === 'edited',
+      workItemsUnrecorded: report.workItemsChanged,
     });
   }
 

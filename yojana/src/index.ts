@@ -25,6 +25,7 @@ export {
   type StatusOutcome,
 } from './ingest.ts';
 export { type ItemProgress, type PlanProgress, progress } from './progress.ts';
+export { type RefreshedFile, type RefreshReport, refresh } from './refresh.ts';
 export {
   type FileState,
   type OpenChange,

@@ -97,6 +97,7 @@ describe('status', () => {
       behind: [],
       conflicts: [],
       statusUnrecorded: false,
+      workItemsUnrecorded: false,
     });
     expect(alpha?.progress).toMatchObject({ done: 1, total: 2 });
     expect(report).toMatchObject({ untracked: [], anomalies: [] });
@@ -127,6 +128,9 @@ describe('status', () => {
     const report = await ctx.run();
     expect(report.plans[1]?.file).toMatchObject({ unrecorded: ['only'] });
     expect(await ctx.store.head()).toBe(before);
+    // A changed bead list is pending too.
+    ctx.files.set('plans/alpha.md', ALPHA.replace('beads: [epic]', 'beads: [epic, more]'));
+    expect((await ctx.run()).plans[0]?.file).toMatchObject({ workItemsUnrecorded: true });
     // Running again still sees it: the dry run did not update the base either.
     expect((await ctx.run()).plans[1]?.file).toMatchObject({ unrecorded: ['only'] });
   });

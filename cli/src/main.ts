@@ -17,6 +17,7 @@ import {
   type OpenChangeResult,
   openChange,
   openWorkspace,
+  refresh,
   type StatusReport,
   settleChangeFile,
   status,
@@ -35,6 +36,7 @@ Usage:
   yojana changes [--all]                    list open changes (--all: closed ones too)
   yojana archive <change>                   apply a change if what it edits has not moved
   yojana abandon <change> --reason <text>   close a change without applying it
+  yojana refresh                            bring log changes into plan files that fell behind
   yojana status [plan] [--check]            plans, progress, pending edits, open changes
   yojana check [plan] [--strict]            verify plan claims against the code
   yojana --version
@@ -375,6 +377,34 @@ function runCheck(flags: Flags, write: Write): Promise<number> {
   });
 }
 
+// refresh
+
+function runRefresh(flags: Flags, write: Write): Promise<number> {
+  return withWorkspace(flags, write, async (ws) => {
+    const report = await refresh({
+      store: ws.store,
+      parser: ws.parser,
+      bases: ws.bases,
+      files: loadPlanFiles(flags.root, ws.plansDir),
+      writePlan: (source, text) => writeFileSync(join(flags.root, source), text),
+    });
+    const lines =
+      report.files.length === 0
+        ? ['every plan file is up to date with the log']
+        : report.files.flatMap((f) => {
+            const what = [
+              f.updated.length > 0 ? `updated ${f.updated.join(', ')}` : '',
+              f.added.length > 0 ? `added ${f.added.join(', ')}` : '',
+              f.removed.length > 0 ? `removed ${f.removed.join(', ')}` : '',
+              f.status === undefined ? '' : `status ${f.status.from} -> ${f.status.to}`,
+            ].filter((s) => s !== '');
+            return [`${f.source}  ${what.join(' · ')}`];
+          });
+    emit(flags, write, report, `${lines.join('\n')}\n`);
+    return 0;
+  });
+}
+
 // status
 
 function day(ms: number): string {
@@ -412,6 +442,7 @@ function describeStatus(report: StatusReport, checks: CheckReport | undefined): 
       const pending = [
         f.unrecorded.length > 0 ? `not ingested: ${f.unrecorded.join(', ')}` : '',
         f.statusUnrecorded ? 'status not ingested' : '',
+        f.workItemsUnrecorded ? 'bead list not ingested' : '',
         f.behind.length > 0 ? `behind the log: ${f.behind.join(', ')}` : '',
         f.conflicts.length > 0 ? `conflicts with the log: ${f.conflicts.join(', ')}` : '',
       ].filter((s) => s !== '');
@@ -521,6 +552,7 @@ export async function run(argv: readonly string[], write: Write): Promise<number
     if (command === 'abandon') return await runAbandon(flags(), write);
     if (command === 'check') return await runCheck(flags(), write);
     if (command === 'status') return await runStatus(flags(), write);
+    if (command === 'refresh') return await runRefresh(flags(), write);
   } catch (error) {
     if (error instanceof YojanaError) {
       write(
