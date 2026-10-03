@@ -65,6 +65,8 @@ interface RequirementDraft {
   readonly op: Op | undefined;
   readonly title: string;
   readonly id: string | undefined;
+  /** What follows the id inside `{#...}`: `key=value` attributes, e.g. `beads=anv-1,anv-2`. */
+  readonly attributes: readonly string[];
   readonly line: number;
   readonly lines: string[];
   readonly claims: Claim[];
@@ -194,12 +196,14 @@ export function parseDocument(input: string, issue: IssueSink): ParsedDocument |
 
     const requirement = REQUIREMENT_HEADING.exec(line);
     if (requirement !== null) {
+      const [id, ...attributes] = (requirement[3] ?? '').trim().split(/\s+/);
       sections.push({
         kind: 'requirement',
         draft: {
           op: requirement[1] as Op | undefined,
           title: (requirement[2] ?? '').trim(),
-          id: requirement[3]?.trim(),
+          id: requirement[3] === undefined ? undefined : id,
+          attributes,
           line: lineNo,
           lines: [],
           claims: [],
@@ -252,11 +256,28 @@ export function parseDocument(input: string, issue: IssueSink): ParsedDocument |
       continue;
     }
     seen.set(draft.id, draft.line);
+    let workItems: string[] = [];
+    let badAttribute = false;
+    for (const attribute of draft.attributes) {
+      const [key, value = ''] = attribute.split('=', 2);
+      if (key === 'beads' && value !== '') {
+        workItems = value.split(',').filter((b) => b !== '');
+      } else {
+        issue(
+          draft.line,
+          'INVALID_REQUIREMENT_ATTRIBUTE',
+          `"${attribute}" is not understood; known: beads=<id>[,<id>...]`,
+        );
+        badAttribute = true;
+      }
+    }
+    if (badAttribute) continue;
     const fields = {
       id: draft.id,
       title: draft.title,
       text: normalizeContent(draft.lines.join('\n')),
       claims: draft.claims,
+      ...(workItems.length > 0 ? { workItems } : {}),
     };
     parts.push({
       kind: 'requirement',

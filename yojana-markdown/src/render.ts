@@ -29,7 +29,9 @@ function renderClaim(claim: Claim): string {
 }
 
 function renderRequirement(requirement: Requirement): string {
-  const blocks = [`## Requirement: ${requirement.title} {#${requirement.id}}`];
+  const work = requirement.workItems ?? [];
+  const links = work.length > 0 ? ` beads=${work.join(',')}` : '';
+  const blocks = [`## Requirement: ${requirement.title} {#${requirement.id}${links}}`];
   if (requirement.text !== '') blocks.push(requirement.text);
   for (const claim of requirement.claims) blocks.push(renderClaim(claim));
   return blocks.join('\n\n');

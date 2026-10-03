@@ -499,6 +499,15 @@ function describeStatus(report: StatusReport, checks: CheckReport | undefined): 
         `  claims     ${n('holds')} hold · ${n('violated')} violated · ${n('unverifiable')} could not be checked${violated.length > 0 ? `  (${[...new Set(violated)].join(', ')})` : ''}`,
       );
     }
+    for (const a of plan.alignment) {
+      if (a.mismatch === undefined) continue;
+      const items = a.items.map((i) => `${i.id} ${i.state}`).join(', ');
+      lines.push(
+        a.mismatch === 'claims-hold-work-open'
+          ? `  close?     ${a.requirement}: ${a.holds === 1 ? 'its claim holds' : `all ${a.holds} claims hold`}, but ${items}`
+          : `  reopen?    ${a.requirement}: ${plural(a.violated, 'claim')} violated, but ${items}`,
+      );
+    }
   }
   for (const u of report.untracked) {
     const why =
@@ -521,19 +530,20 @@ function describeStatus(report: StatusReport, checks: CheckReport | undefined): 
 function runStatus(flags: Flags, write: Write): Promise<number> {
   const [planId] = flags.positional;
   return withWorkspace(flags, async (ws) => {
+    const checks = flags.runCheck
+      ? await check({ store: ws.store, verifiers: verifiers(flags.root), planId })
+      : undefined;
     const report = await status({
       store: ws.store,
       parser: ws.parser,
       bases: ws.bases,
       files: loadPlanFiles(flags.root, ws.plansDir),
       worklink: new BdWorkLink(spawnBd(process.env.BD_BIN ?? 'bd', flags.root)),
+      checks,
       now: Date.now(),
       staleDays: flags.staleDays,
       planId,
     });
-    const checks = flags.runCheck
-      ? await check({ store: ws.store, verifiers: verifiers(flags.root), planId })
-      : undefined;
     emit(flags, write, { ...report, checks }, describeStatus(report, checks));
     return 0;
   });

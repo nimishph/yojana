@@ -70,6 +70,12 @@ never counts as holding; `--strict` makes it fail the run.
 A scoped claim's evidence also states how many matched overall, so a check that passes only
 because nothing matches anywhere is visible.
 
+A requirement can name the work items that deliver it, on its heading:
+`## Requirement: token-frugal primer {#req-primer beads=anv-35b}`. With claim results
+(`status --check`), status flags the two mismatches: every claim holds while a linked item is still
+open (`close?`), and every linked item is closed while a claim is violated (`reopen?`). A
+requirement without links keeps the revision it had before links existed.
+
 Prefer claims that name the work over claims that a place exists: `crates/anvesa-napi/Cargo.toml`
 exists before any SIMD code does, while `//function[@name="batch_scan_top_k"] in crates/` holds
 only once it is written. Boundaries read the same way: `//import[contains(@name, "cli/src")] in

@@ -26,6 +26,8 @@ export interface Requirement {
   readonly text: string;
   readonly revision: RevisionHash;
   readonly claims: readonly Claim[];
+  /** Work items (bead ids) that deliver this requirement; absent in logs written before links. */
+  readonly workItems?: readonly string[] | undefined;
 }
 
 export const PLAN_STATUSES: readonly PlanStatus[] = [

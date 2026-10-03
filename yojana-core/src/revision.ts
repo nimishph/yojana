@@ -66,12 +66,16 @@ export function requirementRevision(requirement: {
     readonly expression: string;
     readonly expect: boolean;
   }[];
+  readonly workItems?: readonly string[] | undefined;
 }): RevisionHash {
   const { id, title, text, claims } = requirement;
   const claimLines = claims.map((c) => `claim ${c.kind} ${c.expect} ${c.expression.trim()}`);
+  // Only present when linked, so a requirement without links keeps the revision it always had.
+  const work = [...(requirement.workItems ?? [])].sort();
+  const workLines = work.length > 0 ? [`work ${work.join(',')}`] : [];
   return revisionHash(
     id,
-    [`title ${title.trim()}`, normalizeContent(text), ...claimLines].join('\n'),
+    [`title ${title.trim()}`, normalizeContent(text), ...claimLines, ...workLines].join('\n'),
   );
 }
 
