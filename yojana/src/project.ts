@@ -12,6 +12,7 @@ import {
   type PlanStatus,
   planHeads,
   type Requirement,
+  type WorkDecision,
   type YojanaEvent,
 } from '@cntxt-labs/yojana-core';
 import type { PlanReport } from './status.ts';
@@ -416,32 +417,71 @@ function projectSection(input: {
           ]),
   ];
 
+  // Decisions not yet applied speak for their items, so the mismatch flags leave those out.
+  const decisions = [...input.state.decisions.values()].filter(
+    (d) => d.planId === plan.id && d.requirement === r.id && d.status !== 'applied',
+  );
+  const decided = (item: string) => decisions.some((d) => d.item === item);
+  const verb = (d: WorkDecision) => (d === 'close' ? 'Close' : 'Reopen');
+
   const flags: { text: string; intent?: Intent; buttons?: readonly Button[] }[] = [];
-  if (alignment?.mismatch === 'claims-hold-work-open') {
-    const open = alignment.items.filter((i) => i.state !== 'closed');
-    flags.push({
-      text: `Every claim holds but ${open.map((i) => i.id).join(', ')} ${open.length === 1 ? 'is' : 'are'} still open.`,
-      intent: 'primary',
-      buttons: open.map((i) => ({
-        action: 'decide',
-        label: `Close ${i.id}`,
-        item: i.id,
-        decision: 'close',
-        primary: true,
-      })),
+  for (const d of decisions) {
+    const button = (label: string): Button => ({
+      action: 'decide',
+      label,
+      item: d.item,
+      decision: d.decision,
+      primary: true,
     });
+    if (d.status === 'recorded') {
+      flags.push({
+        text: `${d.recordedBy} proposes: ${d.decision} ${d.item}. “${d.reason}”`,
+        intent: 'primary',
+        buttons: [button(`${verb(d.decision)} ${d.item}`)],
+      });
+    } else if (d.status === 'finalized') {
+      flags.push({
+        text: `Decided: ${d.decision} ${d.item}. Waiting to be applied to the tracker.`,
+        intent: 'warning',
+      });
+    } else {
+      flags.push({
+        text: `Could not ${d.decision} ${d.item}: ${d.outcome ?? 'no reason given'}`,
+        intent: 'danger',
+        buttons: [button('Try again')],
+      });
+    }
+  }
+  if (alignment?.mismatch === 'claims-hold-work-open') {
+    const open = alignment.items.filter((i) => i.state !== 'closed' && !decided(i.id));
+    if (open.length > 0) {
+      flags.push({
+        text: `Every claim holds but ${open.map((i) => i.id).join(', ')} ${open.length === 1 ? 'is' : 'are'} still open.`,
+        intent: 'primary',
+        buttons: open.map((i) => ({
+          action: 'decide',
+          label: `Close ${i.id}`,
+          item: i.id,
+          decision: 'close',
+          primary: true,
+        })),
+      });
+    }
   }
   if (alignment?.mismatch === 'work-closed-claims-violated') {
-    flags.push({
-      text: 'The work is closed but a claim is violated: closed too early, or regressed.',
-      intent: 'danger',
-      buttons: alignment.items.map((i) => ({
-        action: 'decide',
-        label: `Reopen ${i.id}`,
-        item: i.id,
-        decision: 'reopen',
-      })),
-    });
+    const closed = alignment.items.filter((i) => !decided(i.id));
+    if (closed.length > 0) {
+      flags.push({
+        text: 'The work is closed but a claim is violated: closed too early, or regressed.',
+        intent: 'danger',
+        buttons: closed.map((i) => ({
+          action: 'decide',
+          label: `Reopen ${i.id}`,
+          item: i.id,
+          decision: 'reopen',
+        })),
+      });
+    }
   }
   if (contested) {
     flags.push({
@@ -569,6 +609,25 @@ function projectActivity(
         return event.annotation.replyTo === undefined
           ? `commented on “${titleOf(event.annotation.requirement)}”`
           : `replied on “${titleOf(event.annotation.requirement)}”`;
+      case 'decision-recorded': {
+        // Decided in one step by the same person: the finalized line tells it.
+        if (event.planId !== plan.id) return undefined;
+        const d = state.decisions.get(event.eventId);
+        return d?.finalizedBy === event.actor
+          ? undefined
+          : `proposed to ${event.decision} ${event.item}: ${event.reason}`;
+      }
+      case 'decision-finalized':
+      case 'decision-applied':
+      case 'decision-failed': {
+        const d = state.decisions.get(event.decisionId);
+        if (d === undefined || d.planId !== plan.id) return undefined;
+        if (event.type === 'decision-finalized') {
+          return `decided to ${d.decision} ${d.item}: ${d.reason}`;
+        }
+        if (event.type === 'decision-applied') return `applied the decision: ${event.note}`;
+        return `could not ${d.decision} ${d.item}: ${event.error}`;
+      }
       case 'work-linked':
         return event.planId === plan.id
           ? `linked ${event.workItems.length === 0 ? 'no work items' : event.workItems.join(', ')}`

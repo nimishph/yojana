@@ -99,3 +99,33 @@ describe('BdWorkLink.children', () => {
     expect(lookup.ok && lookup.items.map((i) => i.state)).toEqual(['closed', 'open']);
   });
 });
+
+describe('BdWorkLink.close and reopen', () => {
+  test('run bd close / bd reopen with the reason, and succeed on exit 0', async () => {
+    const seen: string[][] = [];
+    const bd = new BdWorkLink(runner('', seen));
+    expect(await bd.close('anv-1', 'claims hold')).toEqual({ ok: true });
+    expect(await bd.reopen('anv-1', 'regressed')).toEqual({ ok: true });
+    expect(seen).toEqual([
+      ['close', 'anv-1', '--reason', 'claims hold'],
+      ['reopen', 'anv-1', '--reason', 'regressed'],
+    ]);
+  });
+
+  test("a refusal carries bd's own message; bd missing is an error too", async () => {
+    const refused = new BdWorkLink(async () => ({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'Error: issue anv-9 not found\n',
+    }));
+    expect(await refused.close('anv-9', 'x')).toEqual({
+      ok: false,
+      error: 'bd close anv-9 failed (exit 1): Error: issue anv-9 not found',
+    });
+    const missing = new BdWorkLink(async () => {
+      throw new YojanaError('ENOENT', 'no bd');
+    });
+    const answer = await missing.reopen('anv-9', 'x');
+    expect(!answer.ok && answer.error).toContain('could not run bd');
+  });
+});

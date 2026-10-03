@@ -34,7 +34,29 @@ export type YojanaEventInput =
       readonly type: 'work-linked';
       readonly planId: string;
       readonly workItems: readonly string[];
-    };
+    }
+  /**
+   * A decision about a work item (close it, reopen it), asked for on a requirement. Recording is
+   * not acting: a decision is applied to the tracker only once it is finalized, so an agent can
+   * propose and a person decides. Its id is this event's `eventId`.
+   */
+  | {
+      readonly type: 'decision-recorded';
+      readonly planId: string;
+      readonly requirement: RequirementId;
+      readonly item: string;
+      readonly decision: WorkDecision;
+      readonly reason: string;
+    }
+  | { readonly type: 'decision-finalized'; readonly decisionId: string }
+  /** The tracker did it, or the item was already that way. */
+  | { readonly type: 'decision-applied'; readonly decisionId: string; readonly note: string }
+  /** The tracker refused or could not be reached; applying again retries. */
+  | { readonly type: 'decision-failed'; readonly decisionId: string; readonly error: string };
+
+/** What a decision does to a work item. */
+export type WorkDecision = 'close' | 'reopen';
+export const WORK_DECISIONS: readonly WorkDecision[] = ['close', 'reopen'];
 
 export type YojanaEvent = YojanaEventInput & {
   /**

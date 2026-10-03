@@ -48,13 +48,21 @@ const fake: VerifierPort = {
   verify: async (requirement, claim) => ({ requirement, claim, outcome: 'holds', evidence: 'ok' }),
 };
 let bdCalls = 0;
+const closed = new Set<string>();
 const tracker: WorkLinkPort = {
   name: 'fake',
   get: async (ids) => {
     bdCalls += 1;
-    return { ok: true, items: ids.map((id) => ({ id, title: id, state: 'open' as const })) };
+    return {
+      ok: true,
+      items: ids.map((id) => ({ id, title: id, state: closed.has(id) ? 'closed' : 'open' })),
+    };
   },
   children: async () => ({ ok: true, items: [] }),
+  close: async (id) => {
+    closed.add(id);
+    return { ok: true };
+  },
 };
 
 let root: string;
@@ -203,7 +211,7 @@ describe('review session', () => {
     expect((await section('first'))?.body).toMatchObject({ source: 'Reads clearly.' });
   });
 
-  test('refresh asks the tracker again; decide and unknown actions are refused', async () => {
+  test('refresh asks the tracker again; unknown actions are refused', async () => {
     await session.load('review-document', 'plan/s');
     const before = bdCalls;
     await session.load('review-document', 'plan/s');
@@ -214,14 +222,32 @@ describe('review session', () => {
     });
     await session.load('review-document', 'plan/s');
     expect(bdCalls).toBeGreaterThan(before);
-    expect(
-      await session.handle(
-        intent('decide', 'first', { item: 'b-1', decision: 'close', reason: 'done' }),
-      ),
-    ).toMatchObject({ ok: false, code: 'UNSUPPORTED' });
     expect(await session.handle(intent('launch', 'first'))).toMatchObject({ code: 'UNSUPPORTED' });
     expect(await session.handle({ ...intent('edit', 'first'), template: 'x' })).toMatchObject({
       code: 'NOT_FOUND',
     });
+  });
+
+  test('decide closes the work item at once, and the page shows it closed', async () => {
+    expect(
+      await session.handle(
+        intent('decide', 'first', { item: 'b-1', decision: 'close', reason: '' }),
+      ),
+    ).toMatchObject({ ok: false, code: 'REASON_REQUIRED' });
+    expect(
+      await session.handle(
+        intent('decide', 'first', { item: 'b-1', decision: 'close', reason: 'claims hold' }),
+      ),
+    ).toEqual({ ok: true, update: { kind: 'page' } });
+    expect(closed.has('b-1')).toBe(true);
+    const content = await session.load('review-document', 'plan/s');
+    const first = content?.sections.find((s) => s.id === 'first');
+    expect(first?.properties[0]).toEqual({ label: 'b-1 · closed', intent: 'success' });
+    expect(first?.flags).toBeUndefined();
+    const [a, b] = content?.activity ?? [];
+    expect([a?.what, b?.what]).toEqual([
+      'applied the decision: closed b-1',
+      'decided to close b-1: claims hold',
+    ]);
   });
 });

@@ -1,4 +1,10 @@
-import type { WorkItem, WorkItemState, WorkLinkPort, WorkLookup } from '@cntxt-labs/yojana-core';
+import type {
+  WorkChange,
+  WorkItem,
+  WorkItemState,
+  WorkLinkPort,
+  WorkLookup,
+} from '@cntxt-labs/yojana-core';
 
 /**
  * WorkLinkPort for bd (beads, https://github.com/steveyegge/beads), run as a child process in the
@@ -94,6 +100,32 @@ export class BdWorkLink implements WorkLinkPort {
       return { ok: false, error: `bd list answered unexpectedly: ${JSON.stringify(answer.value)}` };
     }
     return { ok: true, items: answer.value.map((raw) => toItem(raw as Record<string, unknown>)) };
+  }
+
+  /** `bd close <id> --reason <reason>`. */
+  close(id: string, reason: string): Promise<WorkChange> {
+    return this.#change(['close', id, '--reason', reason]);
+  }
+
+  /** `bd reopen <id> --reason <reason>`. */
+  reopen(id: string, reason: string): Promise<WorkChange> {
+    return this.#change(['reopen', id, '--reason', reason]);
+  }
+
+  /** A state change succeeds on exit 0; otherwise bd's own message is the error. */
+  async #change(args: readonly string[]): Promise<WorkChange> {
+    let result: RunResult;
+    try {
+      result = await this.#run(args);
+    } catch (error) {
+      return { ok: false, error: `could not run bd (${String(error)}); install it or set BD_BIN` };
+    }
+    if (result.exitCode === 0) return { ok: true };
+    const text = (result.stderr || result.stdout).trim();
+    return {
+      ok: false,
+      error: `bd ${args[0]} ${args[1]} failed (exit ${result.exitCode}): ${text}`,
+    };
   }
 
   async #call(

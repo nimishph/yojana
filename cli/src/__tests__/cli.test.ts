@@ -172,6 +172,38 @@ describe('yojana CLI, start to finish', () => {
     expect(readFileSync(join(root, '.yojana', '.gitignore'), 'utf8')).toContain('review/');
   });
 
+  test('decide proposes, decisions finalizes and applies; a missing bd is recorded as a failure', async () => {
+    writeFileSync(
+      join(root, 'plans', 'work.md'),
+      '---\nid: plan/work\n---\n\n## Requirement: done {#done beads=w-1}\n\nIt is done.\n',
+    );
+    expect((await yojana('ingest')).code).toBe(0);
+    expect((await yojana('decide', 'plan/work', 'done', 'w-1', 'close')).code).toBe(2);
+    expect(
+      (await yojana('decide', 'plan/work', 'done', 'w-9', 'close', '--reason', 'x')).out,
+    ).toContain('NOT_LINKED');
+
+    const proposed = await yojana(
+      'decide',
+      'plan/work',
+      'done',
+      'w-1',
+      'close',
+      '--reason',
+      'it holds',
+    );
+    expect(proposed.out).toContain('proposed; a person finalizes it');
+    const id = proposed.out.split(' ')[0] ?? '';
+    expect((await yojana('decisions', '--apply')).out).toBe('nothing to apply\n');
+    expect((await yojana('decisions')).out).toContain(`${id}  recorded   close w-1`);
+
+    expect((await yojana('decisions', '--finalize', id)).out).toBe(`${id}  finalized\n`);
+    const applied = await yojana('decisions', '--apply');
+    expect(applied.code).toBe(1);
+    expect(applied.out).toContain(`${id}  failed: could not run bd`);
+    expect((await yojana('decisions')).out).toContain(`${id}  failed`);
+  });
+
   test('import writes a plan from a roadmap, and will not overwrite without --force', async () => {
     writeFileSync(
       join(root, 'ROADMAP.md'),

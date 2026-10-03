@@ -15,6 +15,14 @@ export {
 } from './changes.ts';
 export { type CheckReport, check, type PlanCheck } from './check.ts';
 export { type CommentResult, comment } from './comment.ts';
+export {
+  type AppliedDecision,
+  applyDecisions,
+  type DecisionRequest,
+  type DecisionResult,
+  finalizeDecision,
+  recordDecision,
+} from './decisions.ts';
 export { type EditFailure, type EditRequest, editRequirement, suggestEdit } from './edit.ts';
 export {
   type FileReport,
@@ -53,7 +61,6 @@ export {
   reviewContext,
 } from './review.ts';
 export {
-  type DecisionRequest,
   REVIEW_TEMPLATE,
   type ReviewAnswer,
   type ReviewIntent,

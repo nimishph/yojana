@@ -5,6 +5,7 @@ import {
   type AbandonResult,
   type ArchiveResult,
   abandonChange,
+  applyDecisions,
   archiveChange,
   type ChangeProblem,
   type CheckReport,
@@ -12,6 +13,7 @@ import {
   comment,
   ensureGitAttributes,
   type FileReport,
+  finalizeDecision,
   type IngestReport,
   importAndValidate,
   ingest,
@@ -19,6 +21,7 @@ import {
   type OpenChangeResult,
   openChange,
   openWorkspace,
+  recordDecision,
   refresh,
   review,
   type StatusReport,
@@ -46,6 +49,11 @@ Usage:
   yojana comment <plan> <req> "<text>"      note on a requirement [--quote "<span>"] [--reply <id>]
   yojana review [plan] [--check] [--out f]  write an HTML review page (.yojana/review/<plan>.html)
   yojana review --serve [--port n]          the review page, live: comment, edit, suggest, accept
+  yojana decide <plan> <req> <item> close|reopen --reason <text> [--final]
+                                            propose a decision on a work item (--final: decide it)
+  yojana decisions [--apply] [--finalize <id>]
+                                            decisions on work items; --apply runs finalized ones
+                                            through bd (bd close / bd reopen), retrying failures
   yojana import <file> --id <plan-id>       start a plan from an existing Markdown roadmap
                 [--prefix <bead-prefix>] [--out <path>] [--force]
   yojana check [plan] [--strict]            verify plan claims against the code
@@ -97,6 +105,9 @@ interface Flags {
   readonly reply: string | undefined;
   readonly serve: boolean;
   readonly port: number;
+  readonly apply: boolean;
+  readonly final: boolean;
+  readonly finalize: string | undefined;
   readonly positional: readonly string[];
 }
 
@@ -120,6 +131,9 @@ function parseFlags(argv: readonly string[]): Flags {
     reply: undefined as string | undefined,
     serve: false,
     port: DEFAULT_PORT,
+    apply: false,
+    final: false,
+    finalize: undefined as string | undefined,
     positional: [] as string[],
   };
   for (let i = 0; i < argv.length; i++) {
@@ -140,6 +154,9 @@ function parseFlags(argv: readonly string[]): Flags {
     else if (arg === '--quote') flags.quote = value();
     else if (arg === '--reply') flags.reply = value();
     else if (arg === '--serve') flags.serve = true;
+    else if (arg === '--apply') flags.apply = true;
+    else if (arg === '--final') flags.final = true;
+    else if (arg === '--finalize') flags.finalize = value();
     else if (arg === '--port') {
       const port = Number(value());
       if (!Number.isInteger(port) || port < 0 || port > MAX_PORT) {
@@ -457,6 +474,97 @@ function runComment(flags: Flags, write: Write): Promise<number> {
     }
     const a = result.annotation;
     emit(flags, write, result, `${a.id}  on ${planId} ${a.requirement} (revision ${a.revision})\n`);
+    return 0;
+  });
+}
+
+// decisions
+
+function worklink(root: string): BdWorkLink {
+  return new BdWorkLink(spawnBd(process.env.BD_BIN ?? 'bd', root));
+}
+
+function runDecide(flags: Flags, write: Write): Promise<number> {
+  const [planId, requirement, item, decision] = flags.positional;
+  if (
+    planId === undefined ||
+    requirement === undefined ||
+    item === undefined ||
+    decision === undefined ||
+    flags.reason === undefined
+  ) {
+    throw new YojanaError(
+      'CLI_USAGE',
+      'usage: yojana decide <plan> <requirement> <item> close|reopen --reason <text> [--final]',
+    );
+  }
+  return withWorkspace(flags, async (ws) => {
+    const result = await recordDecision({
+      store: ws.store,
+      planId,
+      requirement,
+      item,
+      decision,
+      reason: flags.reason ?? '',
+      actor: actor(),
+      finalize: flags.final,
+    });
+    if (!result.ok) {
+      emit(flags, write, result, `${result.code}: ${result.message}\n`);
+      return 1;
+    }
+    const d = result.decision;
+    const next =
+      d.status === 'recorded'
+        ? 'proposed; a person finalizes it on the review page or with yojana decisions --finalize'
+        : `${d.status}; yojana decisions --apply runs it through ${worklink(flags.root).name}`;
+    emit(flags, write, result, `${d.id}  ${d.decision} ${d.item}: ${next}\n`);
+    return 0;
+  });
+}
+
+function runDecisions(flags: Flags, write: Write): Promise<number> {
+  return withWorkspace(flags, async (ws) => {
+    if (flags.finalize !== undefined) {
+      const result = await finalizeDecision({
+        store: ws.store,
+        decisionId: flags.finalize,
+        actor: actor(),
+      });
+      if (!result.ok) {
+        emit(flags, write, result, `${result.code}: ${result.message}\n`);
+        return 1;
+      }
+      if (!flags.apply) {
+        emit(flags, write, result, `${result.decision.id}  finalized\n`);
+        return 0;
+      }
+    }
+    if (flags.apply) {
+      const applied = await applyDecisions({
+        store: ws.store,
+        worklink: worklink(flags.root),
+        actor: actor(),
+      });
+      const lines = applied.map((a) => `${a.id}  ${a.outcome}: ${a.note}\n`).join('');
+      emit(flags, write, { applied }, lines === '' ? 'nothing to apply\n' : lines);
+      return applied.some((a) => a.outcome === 'failed') ? 1 : 0;
+    }
+    const decisions = [...foldLog(await ws.store.events()).decisions.values()].filter(
+      (d) => flags.all || d.status !== 'applied',
+    );
+    const lines = decisions
+      .map(
+        (d) =>
+          `${d.id}  ${d.status.padEnd('finalized'.length)}  ${d.decision} ${d.item}  (${d.planId} ${d.requirement}, by ${d.finalizedBy ?? d.recordedBy}): ${d.outcome ?? d.reason}\n`,
+      )
+      .join('');
+    emit(
+      flags,
+      write,
+      { decisions },
+      lines === '' ? `no ${flags.all ? '' : 'pending '}decisions\n` : lines,
+    );
     return 0;
   });
 }
@@ -795,6 +903,8 @@ export async function run(argv: readonly string[], write: Write): Promise<number
     if (command === 'repair') return await runRepair(flags(), write);
     if (command === 'import') return runImport(flags(), write);
     if (command === 'comment') return await runComment(flags(), write);
+    if (command === 'decide') return await runDecide(flags(), write);
+    if (command === 'decisions') return await runDecisions(flags(), write);
     if (command === 'review') return await runReview(flags(), write);
   } catch (error) {
     if (error instanceof YojanaError) {

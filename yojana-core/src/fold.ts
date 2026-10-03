@@ -1,4 +1,4 @@
-import type { YojanaEvent } from './events.ts';
+import type { WorkDecision, YojanaEvent } from './events.ts';
 import type { Annotation, Change, Delta, PlanStatus, Requirement } from './model.ts';
 import type { RequirementId, RevisionHash } from './revision.ts';
 
@@ -68,16 +68,42 @@ export function openAnomalies(state: FoldState): Anomaly[] {
   return state.anomalies.filter((a) => a.settledBy === undefined);
 }
 
+/**
+ * recorded: proposed, waiting for a person to finalize it.
+ * finalized: decided, waiting to be applied to the tracker (the outbox).
+ * applied / failed: what the tracker made of it; a failed one is applied again on the next run.
+ */
+export type DecisionStatus = 'recorded' | 'finalized' | 'applied' | 'failed';
+
+export interface DecisionState {
+  readonly id: string;
+  readonly planId: string;
+  readonly requirement: RequirementId;
+  readonly item: string;
+  readonly decision: WorkDecision;
+  readonly reason: string;
+  readonly recordedBy: string;
+  readonly recordedAt: number;
+  status: DecisionStatus;
+  finalizedBy: string | undefined;
+  /** When it last changed status. */
+  at: number;
+  /** The tracker's note on applying, or its error. */
+  outcome: string | undefined;
+}
+
 export interface FoldState {
   readonly plans: Map<string, PlanState>;
   readonly changes: Map<string, ChangeState>;
+  /** Decisions on work items, by id, in the order they were recorded. */
+  readonly decisions: Map<string, DecisionState>;
   readonly anomalies: Anomaly[];
   /** Highest seq folded so far. */
   head: number;
 }
 
 export function emptyFoldState(): FoldState {
-  return { plans: new Map(), changes: new Map(), anomalies: [], head: 0 };
+  return { plans: new Map(), changes: new Map(), decisions: new Map(), anomalies: [], head: 0 };
 }
 
 function planFor(state: FoldState, id: string): PlanState {
@@ -219,6 +245,50 @@ export function applyEvent(state: FoldState, event: YojanaEvent): void {
     }
     case 'annotation-added': {
       planFor(state, event.planId).annotations.push(event.annotation);
+      return;
+    }
+    case 'decision-recorded': {
+      planFor(state, event.planId);
+      state.decisions.set(event.eventId, {
+        id: event.eventId,
+        planId: event.planId,
+        requirement: event.requirement,
+        item: event.item,
+        decision: event.decision,
+        reason: event.reason,
+        recordedBy: event.actor,
+        recordedAt: event.at,
+        status: 'recorded',
+        finalizedBy: undefined,
+        at: event.at,
+        outcome: undefined,
+      });
+      return;
+    }
+    case 'decision-finalized':
+    case 'decision-applied':
+    case 'decision-failed': {
+      const decision = state.decisions.get(event.decisionId);
+      const expected = event.type === 'decision-finalized' ? ['recorded'] : ['finalized', 'failed'];
+      if (decision === undefined || !expected.includes(decision.status)) {
+        state.anomalies.push({
+          seq,
+          code: 'DECISION_OUT_OF_STEP',
+          message: `decision ${event.decisionId} is ${decision?.status ?? 'unknown'}; ${event.type} ignored`,
+        });
+        return;
+      }
+      decision.at = event.at;
+      if (event.type === 'decision-finalized') {
+        decision.status = 'finalized';
+        decision.finalizedBy = event.actor;
+      } else if (event.type === 'decision-applied') {
+        decision.status = 'applied';
+        decision.outcome = event.note;
+      } else {
+        decision.status = 'failed';
+        decision.outcome = event.error;
+      }
       return;
     }
     default: {

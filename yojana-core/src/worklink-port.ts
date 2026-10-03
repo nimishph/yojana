@@ -34,4 +34,12 @@ export interface WorkLinkPort {
   get(ids: readonly string[]): Promise<WorkLookup>;
   /** Direct children of an item (an epic's tasks), closed ones included. */
   children(id: string): Promise<WorkLookup>;
+  /**
+   * Change an item's state, for a finalized decision. Optional: a read-only tracker leaves them
+   * out, and decisions on its items fail with a reason instead.
+   */
+  close?(id: string, reason: string): Promise<WorkChange>;
+  reopen?(id: string, reason: string): Promise<WorkChange>;
 }
+
+export type WorkChange = { readonly ok: true } | { readonly ok: false; readonly error: string };

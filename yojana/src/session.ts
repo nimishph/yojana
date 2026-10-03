@@ -10,6 +10,7 @@ import {
 import { abandonChange, archiveChange } from './changes.ts';
 import { type CheckReport, check } from './check.ts';
 import { comment } from './comment.ts';
+import { applyDecisions, recordDecision } from './decisions.ts';
 import { editRequirement, suggestEdit } from './edit.ts';
 import { projectReview, type ReviewDocument, type ReviewSection } from './project.ts';
 import { status } from './status.ts';
@@ -61,16 +62,6 @@ export type ReviewAnswer =
       readonly current?: unknown;
     };
 
-/** A decision about a work item (close it, reopen it), asked for from a flag on a requirement. */
-export interface DecisionRequest {
-  readonly planId: string;
-  readonly requirement: string;
-  readonly item: string;
-  readonly decision: string;
-  readonly reason: string;
-  readonly actor: string;
-}
-
 export interface ReviewSessionOptions {
   readonly root: string;
   readonly plansDir?: string | undefined;
@@ -83,8 +74,6 @@ export interface ReviewSessionOptions {
   readonly you?: string | undefined;
   /** How the page opens; the person can switch. */
   readonly mode?: 'read' | 'suggest' | 'edit' | undefined;
-  /** Records decisions on work items; without it, `decide` is refused. */
-  readonly decide?: ((request: DecisionRequest) => Promise<ReviewAnswer>) | undefined;
   readonly now?: (() => number) | undefined;
 }
 
@@ -335,17 +324,27 @@ export function reviewSession(options: ReviewSessionOptions): ReviewSession {
       }
 
       case 'decide': {
-        if (options.decide === undefined) {
-          return refuse('UNSUPPORTED', 'Decisions on work items are not recorded here yet.');
-        }
-        return options.decide({
+        // A person deciding on the page finalizes at once; it is applied to the tracker now, and
+        // a failure is recorded and shown on the page, to be retried.
+        const recorded = await recordDecision({
+          store: ws.store,
           planId,
           requirement: key,
           item: field('item'),
           decision: field('decision'),
           reason: field('reason'),
           actor: intent.actor,
+          finalize: true,
         });
+        if (!recorded.ok) return refuse(recorded.code, recorded.message);
+        await applyDecisions({
+          store: ws.store,
+          worklink: tracker,
+          actor: intent.actor,
+          ids: [recorded.decision.id],
+        });
+        workCache.clear();
+        return PAGE;
       }
 
       default:
