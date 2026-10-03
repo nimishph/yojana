@@ -1,6 +1,6 @@
 # yojana design (v0)
 
-**Plans as checkable contracts.** Status: draft, 2026-10-03.
+**Plans as checkable contracts.** Status: v0 built and tested on anvesa, 2026-10-03.
 
 ## Why
 
@@ -71,7 +71,7 @@ because nothing matches anywhere is visible.
 
 Prefer claims that name the work over claims that a place exists: `crates/anvesa-napi/Cargo.toml`
 exists before any SIMD code does, while `//function[@name="batch_scan_top_k"] in crates/` holds
-only once it is written. Example: `//import[contains(@name, "cli/src")] in
+only once it is written. Boundaries read the same way: `//import[contains(@name, "cli/src")] in
 core/` with `expect: false` says the core never imports the CLI.
 
 MDX is not an editing format. Agents edit it less reliably and it needs a compiler. It may come back
@@ -81,7 +81,7 @@ later as a render-only adapter.
 
 `draft → accepted → in-progress → realized`, or at any point `superseded` / `abandoned`. Every
 transition is an event with an actor and a reason. Progress is derived from linked beads, never
-typed in. A change whose beads have not moved for a configurable period is reported as stale.
+typed in. An open change older than a set number of days (default 14) is reported as stale.
 
 ## Changes and conflicts
 
@@ -94,6 +94,12 @@ started from. `archive` uses optimistic concurrency:
 Conflicts block the archive and name the requirement, the expected revision and the actual one.
 The check is `findBaseConflicts` in `yojana-core`.
 
+Change files sit in `changes/` and use `## ADDED`, `## MODIFIED` and `## REMOVED Requirement:`
+sections. `yojana change open` pins each edit to the requirement's current revision; `archive`
+applies it, rewriting the plan file only when that file is in step with the log, and moves the
+change file to `changes/archive/<date>-<id>.md`; `abandon --reason` moves it to
+`changes/abandoned/`.
+
 ## Ports and adapters
 
 | Port | Job | v0 | Later |
@@ -101,7 +107,7 @@ The check is `findBaseConflicts` in `yojana-core`.
 | StorePort | local append-only revision log | memory, JSONL file | SQLite |
 | SyncPort | copy the log elsewhere | noop, file bundle | git ref (`refs/yojana/*`), Dolt, HTTP/S3 |
 | ParserPort | files ⇄ plans | Markdown | OpenSpec import/export, HTML review renderer, MDX render |
-| VerifierPort | check claims against code | anvesa (`wql`, `dependents`) | shell command |
+| VerifierPort | check claims against code | anvesa (`wql`, `dependents`), filesystem (`path`) | text, shell command |
 | WorkLinkPort | plan ⇄ execution | bd | others |
 | RuleSink | proven decisions → rules | — | medha `propose` |
 
@@ -113,8 +119,10 @@ Store and sync are separate ports so a remote never becomes a second source of t
 yojana-core      domain model, ports, conflict check (no dependencies)
 yojana-store     StorePort backends
 yojana-sync      SyncPort adapters
-yojana-markdown  ParserPort adapter
-yojana           engine facade: ingest, status, archive, check
+yojana-markdown  ParserPort adapter (plans and change files)
+yojana-verify    VerifierPort adapters: anvesa, path
+yojana-work      WorkLinkPort adapter: bd
+yojana           engine: ingest, changes, check, status, refresh
 cli              the yojana command
 ```
 
@@ -124,7 +132,7 @@ other only through `src/index.ts`.
 ## Keeping files and log in step
 
 `yojana ingest` records edits to plan files. To tell an edit from a file that has fallen behind, it
-keeps a **base** per plan (`.yojana/base/<plan>.json`, committed with the plans): the revision of
+keeps a **base** per plan (`.yojana/base/<plan>.jsonl`, committed with the plans): the revision of
 each requirement the last time the file and the log agreed, much like git's index. Each requirement,
 and the plan's status, is compared three ways:
 
@@ -138,7 +146,12 @@ and the plan's status, is compared three ways:
 A plan is ingested all or nothing, and re-running with no edits appends nothing. If a base is lost
 for a plan the log already knows, differing requirements are refused unless `--trust-file` says to
 record the file on top of the log. A Claude Code PostToolUse hook on edits under `plans/` can run
-ingest automatically. The file can always be regenerated from the log.
+ingest automatically.
+
+`yojana refresh` goes the other way: it rewrites only the requirements a file is behind on (they
+still match the base, so nothing is lost), keeps edits not yet ingested, and moves the base only
+for what it refreshed. `yojana repair` handles a corrupt log: it keeps every readable event and
+moves the rest to a side file.
 
 ## Status
 
@@ -174,12 +187,30 @@ and comment threads. A comment is an `annotation-added` event anchored to a requ
 revision (optionally a quoted span). When that requirement gets a new revision the comment shows as
 outdated rather than disappearing or silently re-attaching.
 
-## v0 scope
+## Commands
 
-1. Markdown parser with requirement ids and claims; JSONL store plus a contract suite
-2. `ingest`, `status`, and `archive` with the base-revision conflict check
-3. `check` through the anvesa verifier
-4. bd work link: accepting a plan files beads; status reads them back
+```
+yojana ingest [--trust-file]              record edits to plan files
+yojana change open <file>                 open a change file against the log
+yojana changes [--all]                    list changes
+yojana archive <change>                   apply a change if what it edits has not moved
+yojana abandon <change> --reason <text>   close a change without applying it
+yojana refresh                            bring log changes into plan files that fell behind
+yojana status [plan] [--check]            plans, progress, pending edits, open changes
+yojana check [plan] [--strict]            verify claims against the code
+yojana repair                             recover a corrupt log
+```
 
-After v0: OpenSpec import/export, HTML review renderer with annotations, git-ref and Dolt sync,
-medha rule sink, Claude Code plugin.
+Every command takes `--json`, including for errors. Exit codes: 0 done; 1 refused, violated,
+invalid or failed; 2 usage.
+
+## What v0 delivered, and what is next
+
+Built and tested on two clones of anvesa: the parser, the merge-safe log, ingest with bases,
+changes, claim checks through anvesa, progress from bd, status, refresh and repair.
+
+Dogfooding anvesa's own roadmap found that 7 of its 8 claims already hold in the code while all 7
+beads were still open. Next, from that run: link each requirement to its work items so status can
+flag "claims hold, bead open" (yoj-nw5); a `text` claim kind for strings in files (yoj-zuq); an
+importer for existing roadmaps (yoj-04r). Later: the HTML review renderer (yoj-djd), OpenSpec
+import/export, git-ref and Dolt sync, a medha rule sink, and a Claude Code plugin.

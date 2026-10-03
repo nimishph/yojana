@@ -78,19 +78,26 @@ tr.self td { background: var(--accent-soft); font-weight: 500; }
 .note { font-size: 14px; color: var(--muted); }
 a { color: var(--accent); }
 a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.terminal { margin: 0; overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px; font: 400 13px/1.6 var(--font-mono); white-space: pre; }
+.terminal .ok { color: var(--ok); }
+.terminal .bad { color: var(--bad); }
+.terminal .dim { color: var(--muted); }
+.finding { margin: 0; display: grid; gap: 6px; border-left: 3px solid var(--accent); padding: 12px 16px; background: var(--surface); border-radius: 0 6px 6px 0; }
+.finding strong { font-weight: 600; }
+td code, th code { white-space: nowrap; }
 </style>
 
 <main>
   <header>
-    <div class="eyebrow">cntxt-labs · design · draft · 2026-10-03</div>
+    <div class="eyebrow">cntxt-labs · design · v0 built · 2026-10-03</div>
     <h1>yojana: plans as checkable contracts</h1>
-    <p class="lede">Plain Markdown plans with an append-only log of every requirement revision. It catches conflicting edits, checks claims against the code, and reads progress from beads.</p>
-    <div class="meta"><span>repo: yojana/</span><span>epic: yoj-9fe</span><span>source: docs/design.md</span></div>
+    <p class="lede">Plain Markdown plans backed by an append-only log of every requirement revision. It catches conflicting edits, checks claims against the code, and reads progress from beads.</p>
+    <div class="meta"><span>repo: yojana/</span><span>epic: yoj-9fe (closed)</span><span>184 tests</span><span>source: docs/design.md</span></div>
   </header>
 
   <section id="why">
     <h2>Why <span class="anchor">#why</span></h2>
-    <p>Each cntxt-labs tool owns one layer of an agent's working context. Plans are the layer with no owner.</p>
+    <p>Each cntxt-labs tool owns one layer of an agent's working context. Plans were the layer with no owner.</p>
     <div class="scroll">
       <table>
         <thead><tr><th>Tool</th><th>Layer</th><th>Answers</th></tr></thead>
@@ -102,41 +109,92 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         </tbody>
       </table>
     </div>
-    <p>OpenSpec is the closest existing tool. Its specs are living files updated in place by deltas, with git as the history, and archived changes are kept forever. It has no answer for abandoned changes, for two changes editing the same requirement, or for specs that drift from the code. Yojana covers those three.</p>
+    <p>OpenSpec is the closest existing tool. It has no answer for abandoned changes, two changes editing the same requirement, or specs that drift from the code. Yojana covers those three.</p>
+  </section>
+
+  <section id="dogfood">
+    <h2>What it found first <span class="anchor">#dogfood</span></h2>
+    <p>Anvesa's <code>MEDHA_INSPIRED_EVOLUTION.md</code> roadmap, converted into a yojana plan and run with <code>status --check</code> against the real code and beads:</p>
+<pre class="terminal">plan/medha-inspired-evolution  in-progress  8 requirements, 9 claims
+  progress   <span class="bad">0/7 done</span> <span class="dim">(anv-1mh open, anv-80l open, anv-35b open, anv-ja8 open, …)</span>
+  file       plans/medha-inspired-evolution.md  in step
+  claims     <span class="ok">8 hold</span> · <span class="bad">1 violated</span> · 0 could not be checked  (req-ui)</pre>
+    <figure class="finding">
+      <p><strong>The code had mostly caught up with the roadmap; the tracker had not.</strong> The schema, primer, SIMD functions and native crates exist, while every bead was still open, and the document's own status table called one of them "Deferred". Only the dashboard (<code>cli/src/ui.ts</code>) is genuinely missing.</p>
+    </figure>
   </section>
 
   <section id="principles">
     <h2>Principles <span class="anchor">#principles</span></h2>
     <ol class="principles">
       <li><span><b>Not a VCS.</b> Git versions files. Yojana versions meaning: which requirement changed, from which base revision, in which change, and why.</span></li>
-      <li><span><b>Requirement-level revisions.</b> Each requirement has a stable id. Each version of its text is a revision: <code>r_</code> plus 16 hex characters of the sha256 of the normalised text.</span></li>
-      <li><span><b>The log is the source of truth.</b> Plan files are where you edit; every state rebuilds by folding the log. Same pattern as medha's episode log, duplicated rather than shared until it proves itself in both.</span></li>
-      <li><span><b>Report, then refuse ambiguity.</b> A conflict or a hand edit on a stale base is reported and refused, never resolved silently.</span></li>
-      <li><span><b>Markdown is edited, HTML is reviewed.</b> People and agents edit plain Markdown. Review happens in a rendered page with comments and highlights anchored to requirement revisions.</span></li>
+      <li><span><b>Requirement-level revisions.</b> Each requirement has a stable id. Its revision hashes its title, text and claims: <code>r_</code> plus 16 hex characters.</span></li>
+      <li><span><b>The log is the source of truth.</b> Plan files are where you edit; every state is rebuilt by folding the log. Same pattern as medha's episode log, duplicated rather than shared until it proves itself in both.</span></li>
+      <li><span><b>Report, then refuse ambiguity.</b> A conflict, a stale edit or an unverifiable claim is reported and refused or flagged, never resolved silently.</span></li>
+      <li><span><b>Markdown is edited, HTML is reviewed.</b> People and agents edit plain Markdown. Review happens in a rendered page with comments anchored to requirement revisions.</span></li>
     </ol>
   </section>
 
   <section id="format">
-    <h2>File format <span class="anchor">#format</span></h2>
-    <p>Markdown with YAML frontmatter. Requirements are <code>##</code> headings with an explicit id. Machine-readable parts go in fenced <code>yojana:</code> blocks, which show as code on GitHub and parse without a JavaScript compiler.</p>
+    <h2>Plan files <span class="anchor">#format</span></h2>
+    <p>Markdown with YAML frontmatter. Requirements are <code>##</code> headings with an explicit id. Claims go in fenced <code>yojana:claim</code> blocks, which show as code on GitHub and parse without a JavaScript compiler. A file with unresolved git conflict markers is refused.</p>
 <pre><code>---
 id: plan/plugin-packaging
 status: accepted        # draft | accepted | in-progress | realized | superseded | abandoned
 beads: [anv-yp2]
 ---
-## Requirement: plugin loads without a global install {#req-no-global}
-The plugin's MCP server starts through npx when anvesa is not on PATH.
+## Requirement: the core never depends on the CLI {#req-core-no-cli}
+Packaging work must not make core/ reach into cli/.
 
 ```yojana:claim
 kind: wql
-expression: //file[@path=".claude-plugin/plugin.json"]
-expect: true
+expression: //import[contains(@name, "cli/src")] in core/
+expect: false
 ```</code></pre>
-    <p class="note">MDX is not an editing format: agents edit it less reliably and it needs a compiler. It may return later as a render-only adapter.</p>
   </section>
 
-  <section id="lifecycle">
-    <h2>Lifecycle <span class="anchor">#lifecycle</span></h2>
+  <section id="claims">
+    <h2>Claims <span class="anchor">#claims</span></h2>
+    <p>A claim <b>holds</b> when "something matches" equals <code>expect</code> (default true), is <b>violated</b> otherwise, and is <b>unverifiable</b> when the check cannot run. Unverifiable never counts as holding; <code>check --strict</code> makes it fail.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>kind</th><th>expression</th><th>matches when</th></tr></thead>
+        <tbody>
+          <tr><td><code>path</code></td><td>a path or glob</td><td>a file exists</td></tr>
+          <tr><td><code>wql</code></td><td><code>&lt;wql&gt; [in &lt;dir&gt;]</code></td><td>anvesa's query matches, only under the folder if given</td></tr>
+          <tr><td><code>dependents</code></td><td><code>&lt;path&gt; [from &lt;dir&gt;]</code></td><td>something imports the path, only importers under the folder if given</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Scoped evidence also states how many matched overall, so a pass that is only true because nothing matches anywhere is visible. That is how a vacuous claim was caught during testing. Prefer claims that name the work: a crate's <code>Cargo.toml</code> exists before its SIMD code does; <code>//function[@name="batch_scan_top_k"] in crates/</code> holds only once it is written.</p>
+  </section>
+
+  <section id="ingest">
+    <h2>Keeping files and log in step <span class="anchor">#ingest</span></h2>
+    <p><code>yojana ingest</code> keeps a <b>base</b> per plan, the revision of each requirement the last time file and log agreed, much like git's index. Each requirement and the plan's status are compared three ways:</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>file · base · log</th><th>meaning</th><th>ingest does</th></tr></thead>
+        <tbody>
+          <tr><td>file = log</td><td>in step</td><td>nothing</td></tr>
+          <tr><td>base = log, file differs</td><td>you edited it</td><td>records it on top of the log</td></tr>
+          <tr><td>file = base, log differs</td><td>the log moved</td><td>reports the file as behind</td></tr>
+          <tr><td>all three differ</td><td>both moved</td><td>refuses the whole file</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><code>yojana refresh</code> goes the other way: it rewrites only the requirements a file is behind on, which still match their base, so nothing is lost and your un-ingested edits stay.</p>
+  </section>
+
+  <section id="changes">
+    <h2>Changes and conflicts <span class="anchor">#changes</span></h2>
+    <p>Change files use <code>## ADDED</code>, <code>## MODIFIED</code> and <code>## REMOVED Requirement:</code> sections. Opening pins each edit to the requirement's current revision. Archiving applies the change only if nothing it edits has moved since:</p>
+    <figure class="conflict">
+      <span>yojana archive bundle-binary</span>
+      <span class="bad">bundle-binary  refused</span>
+      <span><span class="k">req-no-global  modify</span>  written against r_058e78a0d1a39eb9, the plan now has r_afc4cac51749d64e</span>
+    </figure>
+    <p class="note">Real output from the anvesa test: two changes competed over how the plugin starts its server; the first archived, the second was refused by name and then abandoned with a reason.</p>
     <p class="lifecycle">
       <span class="chip">draft</span><span class="arrow">→</span>
       <span class="chip on">accepted</span><span class="arrow">→</span>
@@ -146,74 +204,68 @@ expect: true
       <span class="chip end-off">superseded</span>
       <span class="chip end-off">abandoned</span>
     </p>
-    <p>Every transition is an event with an actor and a reason. Progress comes from the linked beads and is never typed in. A change whose beads have not moved for a set number of days shows as stale.</p>
   </section>
 
-  <section id="conflicts">
-    <h2>Changes and conflicts <span class="anchor">#conflicts</span></h2>
-    <p>A change is a set of deltas (<code>add</code>, <code>modify</code>, <code>remove</code>), each recorded against the revision it started from. Archive applies a change only if every base is still current:</p>
+  <section id="merges">
+    <h2>Branches and merges <span class="anchor">#merges</span></h2>
+    <p>The log and bases are committed with the plans and hold one fact per line. Yojana writes <code>.yojana/.gitattributes</code> so git merges them by keeping both sides' lines. Events carry a content id and no stored position, so a merged log reads as one log.</p>
     <ul>
-      <li>an <code>add</code> conflicts if the id already exists;</li>
-      <li>a <code>modify</code> or <code>remove</code> conflicts if the requirement has moved past the delta's base.</li>
+      <li><b>Different requirements edited on two branches</b> merge with no manual step.</li>
+      <li><b>The same requirement edited on both</b> becomes <i>contested</i>. The plan file has an ordinary git conflict; once resolved, ingest records the file's version as the resolution and the collision drops out of status.</li>
     </ul>
-    <figure class="conflict">
-      <span>yojana archive chg-dark-mode</span>
-      <span class="bad">refused: 1 requirement changed since this change was written</span>
-      <span><span class="k">requirement</span> req-no-global   <span class="k">op</span> modify</span>
-      <span><span class="k">expected</span>    r_3f9a1c0d77e2b415   <span class="k">actual</span> r_b20e44a9c1f0d3e8</span>
-    </figure>
-    <p>The check already exists as <code>findBaseConflicts</code> in <code>yojana-core</code>, with tests.</p>
   </section>
 
-  <section id="ports">
-    <h2>Ports and adapters <span class="anchor">#ports</span></h2>
+  <section id="status">
+    <h2>Status <span class="anchor">#status</span></h2>
+    <p><code>yojana status [--check]</code> shows each plan's lifecycle, progress from its beads (an epic counts its children; an unreachable bd is reported, never shown as 0%), edits not yet ingested, requirements behind the log, contested requirements, open changes with age, and claim results.</p>
+  </section>
+
+  <section id="architecture">
+    <h2>Ports and packages <span class="anchor">#architecture</span></h2>
     <div class="scroll">
       <table>
-        <thead><tr><th>Port</th><th>Job</th><th>v0</th><th>Later</th></tr></thead>
+        <thead><tr><th>Port</th><th>v0 adapters</th><th>Later</th></tr></thead>
         <tbody>
-          <tr><td>StorePort</td><td>local append-only revision log</td><td>memory, JSONL file</td><td>SQLite</td></tr>
-          <tr><td>SyncPort</td><td>copy the log elsewhere</td><td>noop, file bundle</td><td>git ref <code>refs/yojana/*</code>, Dolt, HTTP/S3</td></tr>
-          <tr><td>ParserPort</td><td>files ⇄ plans</td><td>Markdown</td><td>OpenSpec import/export, HTML review, MDX render</td></tr>
-          <tr><td>VerifierPort</td><td>check claims against code</td><td>anvesa (<code>wql</code>, <code>dependents</code>)</td><td>shell command</td></tr>
-          <tr><td>WorkLinkPort</td><td>plan ⇄ execution</td><td>bd</td><td>others</td></tr>
-          <tr><td>RuleSink</td><td>proven decisions → rules</td><td>—</td><td>medha <code>propose</code></td></tr>
+          <tr><td>StorePort</td><td>memory, JSONL file</td><td>SQLite</td></tr>
+          <tr><td>SyncPort</td><td>noop</td><td>git ref, Dolt, HTTP/S3</td></tr>
+          <tr><td>ParserPort</td><td>Markdown plans and changes</td><td>OpenSpec, HTML review</td></tr>
+          <tr><td>VerifierPort</td><td>anvesa (<code>wql</code>, <code>dependents</code>), <code>path</code></td><td><code>text</code>, shell</td></tr>
+          <tr><td>WorkLinkPort</td><td>bd</td><td>others</td></tr>
+          <tr><td>RuleSink</td><td>—</td><td>medha <code>propose</code></td></tr>
         </tbody>
       </table>
     </div>
-    <p>Store and sync are separate ports, so a remote never becomes a second source of truth.</p>
-<pre><code>yojana-core      domain model, ports, conflict check (no dependencies)
-yojana-store     StorePort backends
-yojana-sync      SyncPort adapters
-yojana-markdown  ParserPort adapter
-yojana           engine: ingest, status, archive, check
+<pre><code>yojana-core      model, ports, conflict check, fold
+yojana-store     log and base stores
+yojana-sync      sync adapters
+yojana-markdown  plan and change files
+yojana-verify    anvesa and path claims
+yojana-work      bd progress
+yojana           ingest, changes, check, status, refresh
 cli              the yojana command</code></pre>
-    <p class="note">dependency-cruiser enforces a one-way graph, and packages import each other only through <code>src/index.ts</code>.</p>
   </section>
 
-  <section id="sync-files">
-    <h2>Keeping files and log in step <span class="anchor">#sync-files</span></h2>
-    <p><code>yojana ingest</code> compares plan files with the last recorded revision of each requirement and records new revisions. A Claude Code PostToolUse hook on edits under <code>plans/</code> runs it automatically. If a file was edited on top of a stale base, ingest refuses and explains. The file can always be regenerated from the log.</p>
+  <section id="commands">
+    <h2>Commands <span class="anchor">#commands</span></h2>
+<pre><code>yojana ingest [--trust-file]              record edits to plan files
+yojana change open &lt;file&gt;                 open a change against the log
+yojana changes [--all]                    list changes
+yojana archive &lt;change&gt;                   apply a change if nothing it edits moved
+yojana abandon &lt;change&gt; --reason &lt;text&gt;   close a change without applying it
+yojana refresh                            bring log changes into files that fell behind
+yojana status [plan] [--check]            the one view
+yojana check [plan] [--strict]            verify claims against the code
+yojana repair                             recover a corrupt log</code></pre>
+    <p class="note">Every command takes <code>--json</code>, errors included. Exit codes: 0 done, 1 refused, violated, invalid or failed, 2 usage.</p>
   </section>
 
-  <section id="review">
-    <h2>Review surface <span class="anchor">#review</span></h2>
-    <p>The HTML renderer turns a plan into a review page: requirements, claim results, bead status and comment threads. A comment is an <code>annotation-added</code> event anchored to a requirement id and revision, optionally with a quoted span. When the requirement gets a new revision, its comments show as outdated instead of vanishing or silently re-attaching.</p>
-  </section>
-
-  <section id="scope">
-    <h2>v0 scope <span class="anchor">#scope</span></h2>
+  <section id="next">
+    <h2>Next <span class="anchor">#next</span></h2>
     <ul class="scope">
-      <li><span class="bead">yoj-9fe.1</span><span>Markdown parser: frontmatter, requirement headings, claim blocks</span></li>
-      <li><span class="bead">yoj-9fe.2</span><span>JSONL file store and a contract suite shared by every backend</span></li>
-      <li><span class="bead">yoj-9fe.3</span><span>Fold: rebuild plan heads and change state from the log</span></li>
-      <li><span class="bead">yoj-9fe.4</span><span><code>ingest</code>: record revisions for edited plan files</span></li>
-      <li><span class="bead">yoj-9fe.5</span><span><code>archive</code> with the base-revision conflict check, plus <code>abandon</code></span></li>
-      <li><span class="bead">yoj-9fe.6</span><span><code>check</code> through the anvesa verifier</span></li>
-      <li><span class="bead">yoj-9fe.7</span><span>bd work link</span></li>
-      <li><span class="bead">yoj-9fe.8</span><span><code>status</code>: progress, open changes, staleness, drift</span></li>
-      <li><span class="bead">yoj-9fe.9</span><span>CLI wiring, <code>--json</code>, error codes</span></li>
-      <li><span class="bead">yoj-9fe.10</span><span>Dogfood on <code>anvesa/MEDHA_INSPIRED_EVOLUTION.md</code></span></li>
+      <li><span class="bead">yoj-nw5</span><span>Link each requirement to its beads, so status flags "claims hold, bead open" and the reverse</span></li>
+      <li><span class="bead">yoj-zuq</span><span><code>text</code> claims: a file contains, or lacks, a pattern</span></li>
+      <li><span class="bead">yoj-04r</span><span>Import an existing Markdown roadmap as a plan</span></li>
+      <li><span class="bead">yoj-djd</span><span>HTML review page with comments anchored to requirement revisions</span></li>
     </ul>
-    <p class="note">After v0: HTML review renderer with annotations (filed, labelled post-v0), OpenSpec import/export, git-ref and Dolt sync, medha rule sink, Claude Code plugin.</p>
   </section>
 </main>
