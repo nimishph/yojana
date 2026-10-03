@@ -7,6 +7,8 @@ import {
   abandonChange,
   archiveChange,
   type ChangeProblem,
+  type CheckReport,
+  check,
   ensureGitAttributes,
   type FileReport,
   type IngestReport,
@@ -20,6 +22,7 @@ import {
   type Workspace,
 } from '@cntxt-labs/yojana';
 import { foldLog, YojanaError } from '@cntxt-labs/yojana-core';
+import { AnvesaVerifier, PathVerifier, spawnAnvesa } from '@cntxt-labs/yojana-verify';
 
 const USAGE = `yojana ${VERSION}: plans as checkable contracts
 
@@ -30,7 +33,7 @@ Usage:
   yojana archive <change>                   apply a change if what it edits has not moved
   yojana abandon <change> --reason <text>   close a change without applying it
   yojana status                             plans, progress, staleness, drift        (v0)
-  yojana check [plan]                       verify plan claims against the code      (v0)
+  yojana check [plan] [--strict]            verify plan claims against the code
   yojana --version
 
 Options:
@@ -38,6 +41,9 @@ Options:
   --plans <dir>     plan folder, relative to the root (default: plans)
   --changes <dir>   change folder, relative to the root (default: changes)
   --json            machine-readable output
+  --strict          check: also fail when a claim cannot be verified
+
+Claims run through anvesa (wql, dependents); set ANVESA_BIN if it is not on PATH.
 `;
 
 type Write = (text: string) => void;
@@ -49,6 +55,7 @@ interface Flags {
   readonly json: boolean;
   readonly trustFile: boolean;
   readonly all: boolean;
+  readonly strict: boolean;
   readonly reason: string | undefined;
   readonly positional: readonly string[];
 }
@@ -61,6 +68,7 @@ function parseFlags(argv: readonly string[]): Flags {
     json: false,
     trustFile: false,
     all: false,
+    strict: false,
     reason: undefined as string | undefined,
     positional: [] as string[],
   };
@@ -78,6 +86,7 @@ function parseFlags(argv: readonly string[]): Flags {
     else if (arg === '--json') flags.json = true;
     else if (arg === '--trust-file') flags.trustFile = true;
     else if (arg === '--all') flags.all = true;
+    else if (arg === '--strict') flags.strict = true;
     else if (arg.startsWith('--')) throw new YojanaError('CLI_USAGE', `unknown option ${arg}`);
     else flags.positional.push(arg);
   }
@@ -306,6 +315,46 @@ function runArchive(flags: Flags, write: Write): Promise<number> {
   });
 }
 
+// check
+
+function describeCheck(report: CheckReport): string {
+  if (report.plans.length === 0) return 'no plans in the log; run yojana ingest first\n';
+  const lines: string[] = [];
+  for (const plan of report.plans) {
+    lines.push(plan.planId);
+    if (plan.results.length === 0) lines.push('  no claims');
+    for (const r of plan.results) {
+      const expectation = r.claim.expect ? '' : ' (expect none)';
+      lines.push(
+        `  ${r.requirement}  ${r.outcome}  ${r.claim.kind} ${r.claim.expression}${expectation}`,
+      );
+      lines.push(`      ${r.evidence}`);
+    }
+  }
+  lines.push(
+    '',
+    `${report.holds} hold · ${report.violated} violated · ${report.unverifiable} could not be checked`,
+  );
+  return `${lines.join('\n')}\n`;
+}
+
+function runCheck(flags: Flags, write: Write): Promise<number> {
+  const [planId] = flags.positional;
+  return withWorkspace(flags, write, async (ws) => {
+    const report = await check({
+      store: ws.store,
+      verifiers: [
+        new PathVerifier(flags.root),
+        new AnvesaVerifier(spawnAnvesa(process.env.ANVESA_BIN ?? 'anvesa', flags.root)),
+      ],
+      planId,
+    });
+    emit(flags, write, report, describeCheck(report));
+    if (report.violated > 0) return 1;
+    return flags.strict && report.unverifiable > 0 ? 1 : 0;
+  });
+}
+
 // abandon
 
 function runAbandon(flags: Flags, write: Write): Promise<number> {
@@ -345,6 +394,7 @@ export async function run(argv: readonly string[], write: Write): Promise<number
     if (command === 'changes') return await runChanges(flags(), write);
     if (command === 'archive') return await runArchive(flags(), write);
     if (command === 'abandon') return await runAbandon(flags(), write);
+    if (command === 'check') return await runCheck(flags(), write);
   } catch (error) {
     if (error instanceof YojanaError) {
       write(

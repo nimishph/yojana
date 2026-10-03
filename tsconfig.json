@@ -25,6 +25,7 @@
       "@cntxt-labs/yojana-store": ["./yojana-store/src/index.ts"],
       "@cntxt-labs/yojana-sync": ["./yojana-sync/src/index.ts"],
       "@cntxt-labs/yojana-markdown": ["./yojana-markdown/src/index.ts"],
+      "@cntxt-labs/yojana-verify": ["./yojana-verify/src/index.ts"],
       "@cntxt-labs/yojana": ["./yojana/src/index.ts"]
     }
   },

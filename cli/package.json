@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "@cntxt-labs/yojana": "workspace:*",
-    "@cntxt-labs/yojana-core": "workspace:*"
+    "@cntxt-labs/yojana-core": "workspace:*",
+    "@cntxt-labs/yojana-verify": "workspace:*"
   },
   "license": "MIT"
 }

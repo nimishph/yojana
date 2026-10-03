@@ -14,9 +14,8 @@ Why: anvesa has an MCP server and a skill, but users wire both up by hand.
 The plugin's MCP server starts through `npx` when `anvesa` is not on PATH.
 
 ```yojana:claim
-kind: wql
-expression: //file[@path=".claude-plugin/plugin.json"]
-expect: true
+kind: path
+expression: .claude-plugin/plugin.json
 ```
 
 ## Requirement: core stays independent of the CLI {#req-core-no-cli}
@@ -24,7 +23,7 @@ expect: true
 Nothing under `core/` imports from `cli/`.
 
 ```yojana:claim
-kind: dependents
-expression: cli/src/index.ts --from core/
+kind: wql
+expression: //import[contains(@name, "anvesa-cli") or contains(@name, "cli/src")] in core/
 expect: false
 ```

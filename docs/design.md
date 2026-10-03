@@ -48,11 +48,27 @@ beads: [anv-yp2]
 The plugin's MCP server starts through npx when anvesa is not on PATH.
 
 ```yojana:claim
-kind: wql
-expression: //file[@path=".claude-plugin/plugin.json"]
-expect: true
+kind: path
+expression: .claude-plugin/plugin.json
 ```
 ````
+
+### Claims
+
+`yojana check` runs every claim of every plan in the log. A claim **holds** when "something
+matches" equals `expect` (default `true`), is **violated** otherwise, and is **unverifiable** when
+the check cannot run (anvesa missing, no index, an invalid query, an unknown kind). Unverifiable
+never counts as holding; `--strict` makes it fail the run.
+
+| kind | expression | matches when |
+|---|---|---|
+| `path` | a path or glob from the repo root | a file exists |
+| `wql` | `<wql> [in <dir>]` | anvesa's query matches, only in files under `<dir>` if given |
+| `dependents` | `<path> [from <dir>]` | something imports `<path>`, only importers under `<dir>` if given |
+
+A scoped claim's evidence also states how many matched overall, so a check that passes only
+because nothing matches anywhere is visible. Example: `//import[contains(@name, "cli/src")] in
+core/` with `expect: false` says the core never imports the CLI.
 
 MDX is not an editing format. Agents edit it less reliably and it needs a compiler. It may come back
 later as a render-only adapter.

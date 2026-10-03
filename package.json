@@ -8,6 +8,7 @@
     "yojana-store",
     "yojana-sync",
     "yojana-markdown",
+    "yojana-verify",
     "yojana",
     "cli"
   ],
@@ -18,7 +19,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "boundaries": "depcruise --config .dependency-cruiser.cjs yojana-core/src yojana-store/src yojana-sync/src yojana-markdown/src yojana/src cli/src",
+    "boundaries": "depcruise --config .dependency-cruiser.cjs yojana-core/src yojana-store/src yojana-sync/src yojana-markdown/src yojana-verify/src yojana/src cli/src",
     "test": "bun test",
     "check": "bun run lint && bun run typecheck && bun run boundaries && bun run test",
     "changelog": "git-cliff -o CHANGELOG.md",

@@ -12,6 +12,7 @@ export {
   openChange,
   type PlanFileUpdate,
 } from './changes.ts';
+export { type CheckReport, check, type PlanCheck } from './check.ts';
 export {
   type FileReport,
   type IngestOptions,

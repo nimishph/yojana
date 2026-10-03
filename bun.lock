@@ -20,6 +20,7 @@
       "dependencies": {
         "@cntxt-labs/yojana": "workspace:*",
         "@cntxt-labs/yojana-core": "workspace:*",
+        "@cntxt-labs/yojana-verify": "workspace:*",
       },
     },
     "yojana": {
@@ -30,6 +31,7 @@
         "@cntxt-labs/yojana-markdown": "workspace:*",
         "@cntxt-labs/yojana-store": "workspace:*",
         "@cntxt-labs/yojana-sync": "workspace:*",
+        "@cntxt-labs/yojana-verify": "workspace:*",
       },
     },
     "yojana-core": {
@@ -52,6 +54,13 @@
     },
     "yojana-sync": {
       "name": "@cntxt-labs/yojana-sync",
+      "version": "0.0.0",
+      "dependencies": {
+        "@cntxt-labs/yojana-core": "workspace:*",
+      },
+    },
+    "yojana-verify": {
+      "name": "@cntxt-labs/yojana-verify",
       "version": "0.0.0",
       "dependencies": {
         "@cntxt-labs/yojana-core": "workspace:*",
@@ -88,6 +97,8 @@
     "@cntxt-labs/yojana-store": ["@cntxt-labs/yojana-store@workspace:yojana-store"],
 
     "@cntxt-labs/yojana-sync": ["@cntxt-labs/yojana-sync@workspace:yojana-sync"],
+
+    "@cntxt-labs/yojana-verify": ["@cntxt-labs/yojana-verify@workspace:yojana-verify"],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
