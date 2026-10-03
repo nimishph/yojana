@@ -4,8 +4,7 @@ import { MarkdownParser } from '@cntxt-labs/yojana-markdown';
 import { MemoryBaseStore, MemoryStore } from '@cntxt-labs/yojana-store';
 import { comment } from '../comment.ts';
 import { ingest } from '../ingest.ts';
-import { escapeHtml, renderMarkdown, review } from '../review.ts';
-import { status } from '../status.ts';
+import { projectReview } from '../project.ts';
 
 const parser = new MarkdownParser();
 
@@ -33,14 +32,15 @@ async function setup() {
     files = [{ source: 'plans/r.md', text }];
     await ingest({ store, parser, bases, files, actor: 'me' });
   };
-  const page = async () =>
-    (await review({
-      store,
+  const content = async () =>
+    projectReview({
+      events: await store.events(),
       planId: 'plan/r',
-      status: await status({ store, parser, bases, files, now: 0, staleDays: 14 }),
-      generatedAt: 0,
-    })) ?? '';
-  return { store, edit, page };
+      checks: [],
+      now: 0,
+      mode: 'read',
+    });
+  return { store, edit, content };
 }
 
 describe('comment', () => {
@@ -82,16 +82,8 @@ describe('comment', () => {
   });
 });
 
-describe('review page', () => {
-  test('escapes plan text: markup in a requirement is shown, never run', async () => {
-    const html = await (await setup()).page();
-    expect(html).not.toContain('<script>alert(1)</script>');
-    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
-    expect(html).toContain('<code>code</code>');
-    expect(html).toContain('id="safe"');
-  });
-
-  test('a quoted span is highlighted while current; the note goes outdated when the text changes', async () => {
+describe('comments on the page', () => {
+  test('a quote is marked while current; the thread goes outdated when the text changes', async () => {
     const ctx = await setup();
     await comment({
       store: ctx.store,
@@ -101,38 +93,15 @@ describe('review page', () => {
       author: 'reviewer',
       quote: 'stay short',
     });
-    const before = await ctx.page();
-    expect(before).toContain('<mark>stay short</mark>');
-    expect(before).not.toContain('>outdated<');
+    const before = await ctx.content();
+    expect(before?.threads[0]).toMatchObject({ mark: '1', outdated: false });
+    expect(before?.sections[1]?.body).toMatchObject({ marks: [{ text: 'stay short', id: '1' }] });
 
     await ctx.edit(PLAN.replace('Topics stay short and current.', 'Topics: overview, wql.'));
-    const after = await ctx.page();
-    expect(after).toContain('>outdated<');
-    expect(after).not.toContain('<mark>');
-    expect(after).toContain('1 comment (1 outdated)');
-  });
-
-  test('renderMarkdown keeps fences, lists and headings, escapes the rest', () => {
-    const html = renderMarkdown(
-      'Intro **bold** <b>x</b>\n\n- one\n- two\n\n### Sub\n\n```\n<a>\n```',
-    );
-    expect(html).toContain('<strong>bold</strong> &lt;b&gt;x&lt;/b&gt;');
-    expect(html).toContain('<ul><li>one</li><li>two</li></ul>');
-    expect(html).toContain('<h4>Sub</h4>');
-    expect(html).toContain('<pre><code>&lt;a&gt;</code></pre>');
-    expect(escapeHtml(`"'&`)).toBe('&quot;&#39;&amp;');
-  });
-
-  test('an unknown plan has no page', async () => {
-    const { store } = await setup();
-    expect(
-      await review({
-        store,
-        planId: 'plan/none',
-        status: { plans: [], untracked: [], anomalies: [] },
-        generatedAt: 0,
-      }),
-    ).toBeUndefined();
+    const after = await ctx.content();
+    expect(after?.threads[0]).toMatchObject({ outdated: true });
+    expect(after?.threads[0]?.mark).toBeUndefined();
+    expect(after?.sections[1]?.body).not.toHaveProperty('marks');
   });
 });
 
@@ -143,7 +112,20 @@ describe('quotes selected on the rendered page', () => {
       comment({ store, planId: 'plan/r', requirement: 'safe', body: 'x', author: 'a', quote });
     // The page shows `code` without backticks; the selection carries none.
     expect((await run('and keep code')).ok).toBe(true);
+    // It still gets its number, placed where it reads.
+    const [thread] = (await setupContent(store)) ?? [];
+    expect(thread).toMatchObject({ quote: 'and keep code', mark: '1' });
     expect((await run('keep   code.')).ok).toBe(true);
     expect(await run('keep the code')).toMatchObject({ ok: false, code: 'QUOTE_NOT_FOUND' });
   });
 });
+
+async function setupContent(store: MemoryStore) {
+  return projectReview({
+    events: await store.events(),
+    planId: 'plan/r',
+    checks: [],
+    now: 0,
+    mode: 'read',
+  })?.threads;
+}

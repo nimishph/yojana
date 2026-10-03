@@ -15,6 +15,7 @@ import {
   type WorkDecision,
   type YojanaEvent,
 } from '@cntxt-labs/yojana-core';
+import { quotePosition } from './comment.ts';
 import type { PlanReport } from './status.ts';
 
 /**
@@ -191,7 +192,8 @@ function deltaTarget(delta: Delta): string {
 /**
  * Number the comments that quote live text, in reading order: section by section, and within a
  * section by where the quote sits in the text. Outdated comments and quotes no longer in the text
- * get no number, since there is nothing to point at.
+ * get no number, since there is nothing to point at. A quote selected on the page may have lost
+ * Markdown marks; it is placed by where it reads.
  */
 function numberMarks(state: ReturnType<typeof foldLog>, plan: PlanState): Map<string, string> {
   const numbers = new Map<string, string>();
@@ -204,10 +206,12 @@ function numberMarks(state: ReturnType<typeof foldLog>, plan: PlanState): Map<st
           a.replyTo === undefined &&
           a.quote !== undefined &&
           a.quote !== '' &&
-          requirement.text.includes(a.quote) &&
           !isAnnotationOutdated(state, plan.id, a),
       )
-      .map((a) => ({ a, at: requirement.text.indexOf(a.quote ?? '') }))
+      .flatMap((a) => {
+        const at = quotePosition(requirement.text, a.quote ?? '');
+        return at === undefined ? [] : [{ a, at }];
+      })
       .sort((x, y) => x.at - y.at);
     for (const { a } of quoted) {
       next += 1;

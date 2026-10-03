@@ -67,5 +67,16 @@ function asRead(text: string): string {
 
 /** Whether a quote appears in a requirement, as written or as the page renders it. */
 export function quoteAppears(text: string, quote: string): boolean {
-  return text.includes(quote) || asRead(text).includes(asRead(quote));
+  return quotePosition(text, quote) !== undefined;
+}
+
+/**
+ * Where a quote sits in a requirement, for reading order: its index in the text as written, or
+ * failing that in the text as read. Undefined when it does not appear.
+ */
+export function quotePosition(text: string, quote: string): number | undefined {
+  const written = text.indexOf(quote);
+  if (written >= 0) return written;
+  const read = asRead(text).indexOf(asRead(quote));
+  return read >= 0 ? read : undefined;
 }

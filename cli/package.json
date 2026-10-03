@@ -12,7 +12,10 @@
     "@cntxt-labs/yojana-core": "workspace:*",
     "@cntxt-labs/yojana-verify": "workspace:*",
     "@cntxt-labs/yojana-work": "workspace:*",
-    "htmx.org": "2.0.4"
+    "@cntxt-labs/patra-core": "link:@cntxt-labs/patra-core",
+    "@cntxt-labs/patra-serve": "link:@cntxt-labs/patra-serve",
+    "@cntxt-labs/patra-templates": "link:@cntxt-labs/patra-templates",
+    "@cntxt-labs/patra-themes": "link:@cntxt-labs/patra-themes"
   },
   "license": "MIT"
 }

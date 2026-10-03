@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
+import { pageHead, renderPage } from '@cntxt-labs/patra-core';
+import { themeFile } from '@cntxt-labs/patra-themes';
 import {
   type AbandonResult,
   type ArchiveResult,
@@ -21,9 +23,10 @@ import {
   type OpenChangeResult,
   openChange,
   openWorkspace,
+  REVIEW_TEMPLATE,
   recordDecision,
   refresh,
-  review,
+  reviewSession,
   type StatusReport,
   settleChangeFile,
   status,
@@ -33,7 +36,7 @@ import {
 import { foldLog, type VerifierPort, YojanaError } from '@cntxt-labs/yojana-core';
 import { AnvesaVerifier, PathVerifier, spawnAnvesa, TextVerifier } from '@cntxt-labs/yojana-verify';
 import { BdWorkLink, spawnBd } from '@cntxt-labs/yojana-work';
-import { startReviewServer } from './serve.ts';
+import { reviewTemplate, startReviewServer } from './serve.ts';
 
 const USAGE = `yojana ${VERSION}: plans as checkable contracts
 
@@ -580,9 +583,15 @@ async function runServe(flags: Flags, write: Write): Promise<number> {
     actor: actor(),
     runCheck: flags.runCheck,
     verifiers: () => verifiers(flags.root),
-    worklink: () => new BdWorkLink(spawnBd(process.env.BD_BIN ?? 'bd', flags.root)),
+    worklink: () => worklink(flags.root),
   });
+  const plans = await server.plans();
   write(`review server on ${server.url} (this machine only); stop it with Ctrl+C\n`);
+  write(
+    plans.length === 0
+      ? 'no plans in the log yet; run yojana ingest\n'
+      : plans.map((p) => `  ${p.id}  ${p.status}  ${p.url}\n`).join(''),
+  );
   // Serves until the process is stopped.
   await new Promise<never>(() => undefined);
   return 0;
@@ -598,31 +607,31 @@ function runReview(flags: Flags, write: Write): Promise<number> {
       write('no plans in the log; run yojana ingest first\n');
       return 1;
     }
-    const checks = flags.runCheck
-      ? await check({ store: ws.store, verifiers: verifiers(flags.root), planId: named })
-      : undefined;
-    const report = await status({
-      store: ws.store,
-      parser: ws.parser,
-      bases: ws.bases,
-      files: loadPlanFiles(flags.root, ws.plansDir),
-      worklink: new BdWorkLink(spawnBd(process.env.BD_BIN ?? 'bd', flags.root)),
-      checks,
-      now: Date.now(),
-      staleDays: flags.staleDays,
-      planId: named,
+    // The page patra serves live, written once: the same projection, rendered without its runtime.
+    const session = reviewSession({
+      root: flags.root,
+      plansDir: flags.plans,
+      changesDir: flags.changes,
+      runCheck: flags.runCheck,
+      verifiers: () => verifiers(flags.root),
+      worklink: () => worklink(flags.root),
+      you: actor(),
+      mode: 'read',
     });
+    const template = reviewTemplate();
+    const head = pageHead(template, readFileSync(themeFile('default'), 'utf8'), []);
     const written: string[] = [];
     for (const planId of planIds) {
-      const html = await review({
-        store: ws.store,
-        planId,
-        status: report,
-        checks: checks?.plans.find((p) => p.planId === planId)?.results,
-        generatedAt: Date.now(),
-      });
-      if (html === undefined) {
+      const content = await session.load(REVIEW_TEMPLATE, planId);
+      if (content === undefined) {
         throw new YojanaError('PLAN_NOT_FOUND', `the log has no plan ${planId}`);
+      }
+      const page = renderPage(template, content, { head });
+      if (!page.ok) {
+        throw new YojanaError(
+          'TEMPLATE_INVALID',
+          page.problems.map((p) => `${p.at} ${p.message}`).join('; '),
+        );
       }
       const name = planId.split('/').at(-1) ?? planId;
       const out =
@@ -630,7 +639,7 @@ function runReview(flags: Flags, write: Write): Promise<number> {
           ? resolve(flags.root, flags.out)
           : join(flags.root, '.yojana', 'review', `${name}.html`);
       mkdirSync(join(out, '..'), { recursive: true });
-      writeFileSync(out, html);
+      writeFileSync(out, page.html);
       written.push(toSource(flags.root, out));
     }
     emit(flags, write, { written }, `${written.map((w) => `wrote ${w}`).join('\n')}\n`);

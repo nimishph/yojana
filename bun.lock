@@ -18,11 +18,14 @@
         "yojana": "./src/main.ts",
       },
       "dependencies": {
+        "@cntxt-labs/patra-core": "link:@cntxt-labs/patra-core",
+        "@cntxt-labs/patra-serve": "link:@cntxt-labs/patra-serve",
+        "@cntxt-labs/patra-templates": "link:@cntxt-labs/patra-templates",
+        "@cntxt-labs/patra-themes": "link:@cntxt-labs/patra-themes",
         "@cntxt-labs/yojana": "workspace:*",
         "@cntxt-labs/yojana-core": "workspace:*",
         "@cntxt-labs/yojana-verify": "workspace:*",
         "@cntxt-labs/yojana-work": "workspace:*",
-        "htmx.org": "2.0.4",
       },
     },
     "yojana": {
@@ -36,8 +39,8 @@
         "@cntxt-labs/yojana-verify": "workspace:*",
       },
       "devDependencies": {
-        "@cntxt-labs/patra-core": "file:../../patra/patra-core",
-        "@cntxt-labs/patra-templates": "file:../../patra/templates",
+        "@cntxt-labs/patra-core": "link:@cntxt-labs/patra-core",
+        "@cntxt-labs/patra-templates": "link:@cntxt-labs/patra-templates",
       },
     },
     "yojana-core": {
@@ -99,7 +102,13 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.15", "", { "os": "win32", "cpu": "x64" }, "sha512-yAzh4UqEImV6Hcy0zjUqNfJAsUhoD64FBQCdTG8Md/Z2wQeVP/ZmJ3XRYAs1g8J9fjTFyl2fCtc5FB5til47+g=="],
 
-    "@cfworker/json-schema": ["@cfworker/json-schema@4.1.1", "", {}, "sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og=="],
+    "@cntxt-labs/patra-core": ["@cntxt-labs/patra-core@link:@cntxt-labs/patra-core", {}],
+
+    "@cntxt-labs/patra-serve": ["@cntxt-labs/patra-serve@link:@cntxt-labs/patra-serve", {}],
+
+    "@cntxt-labs/patra-templates": ["@cntxt-labs/patra-templates@link:@cntxt-labs/patra-templates", {}],
+
+    "@cntxt-labs/patra-themes": ["@cntxt-labs/patra-themes@link:@cntxt-labs/patra-themes", {}],
 
     "@cntxt-labs/yojana": ["@cntxt-labs/yojana@workspace:yojana"],
 
@@ -118,8 +127,6 @@
     "@cntxt-labs/yojana-work": ["@cntxt-labs/yojana-work@workspace:yojana-work"],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
-
-    "@types/mustache": ["@types/mustache@4.2.6", "", {}, "sha512-t+8/QWTAhOFlrF1IVZqKnMRJi84EgkIK5Kh0p2JV4OLywUvCwJPFxbJAl7XAow7DVIHsF+xW9f1MVzg0L6Szjw=="],
 
     "@types/node": ["@types/node@26.6.4", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-ldVPDCzj7fsaGZrLB0NuHuTvJcsNasysBAqMolr/cgxrLd1xbqxIr3XJiPnHHJUCxj5sNF1vnRj9aWnrVh5Jcg=="],
 
@@ -161,8 +168,6 @@
 
     "hasown": ["hasown@2.0.4", "", { "dependencies": { "function-bind": "^1.1.2" } }, "sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A=="],
 
-    "htmx.org": ["htmx.org@2.0.4", "", {}, "sha512-HLxMCdfXDOJirs3vBZl/ZLoY+c7PfM4Ahr2Ad4YXh6d22T5ltbTXFFkpx9Tgb2vvmWFMbIc3LqN2ToNkZJvyYQ=="],
-
     "ignore": ["ignore@7.0.11", "", {}, "sha512-YChdK5txDjwGUvgR7oCJcLGkwi3LDh8Zx8tS7ndYciLEg/oOCL26VUBSUEtgS7EjiybcBqFxh5j0rAdDX7/bbg=="],
 
     "ini": ["ini@4.1.1", "", {}, "sha512-QQnnxNyfvmHFIsj7gkPcYymR8Jdw/o7mp5ZFihxn6h8Ci6fh3Dx4E1gPjpQEpIuPo9XVNY/ZUwh4BPMjGyL01g=="],
@@ -180,8 +185,6 @@
     "kleur": ["kleur@3.0.3", "", {}, "sha512-eTIzlVOSUR+JxdDFepEYcBMtZ9Qqdef+rnzWdRZuMbOywu5tO2w2N7rqjoANZ5k9vywhL6Br1VRjUIgTQx4E8w=="],
 
     "minimist": ["minimist@1.2.8", "", {}, "sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA=="],
-
-    "mustache": ["mustache@4.2.0", "", { "bin": { "mustache": "bin/mustache" } }, "sha512-71ippSywq5Yb7/tVYyGbkBggbU8H3u5Rz56fH60jGFgr8uHwxs+aSKeqmluIVzM0m0kB7xQjKS6qPfd0b2ZoqQ=="],
 
     "path-parse": ["path-parse@1.0.7", "", {}, "sha512-LDJzPVEEEPR+y48z93A0Ed0yXb8pAByGWo/k5YYdYgpY2/2EsOsksJrq7lOHxryrVOn1ejG6oAp8ahvOIQD8sw=="],
 
@@ -218,9 +221,5 @@
     "undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
 
     "watskeburt": ["watskeburt@6.0.0", "", { "bin": { "watskeburt": "dist/run-cli.js" } }, "sha512-jfiuDABaxSkC71T6oZ3vCS99roYkSHm/+As+G0Dz8taAHQb+SJBvLEm5RlsgG71XdfAj3rv7eudUBTgwcQUPlQ=="],
-
-    "@cntxt-labs/yojana/@cntxt-labs/patra-core": ["@cntxt-labs/patra-core@file:../patra/patra-core", { "dependencies": { "@cfworker/json-schema": "4.1.1", "mustache": "4.2.0" }, "devDependencies": { "@types/mustache": "^4.2.6" } }],
-
-    "@cntxt-labs/yojana/@cntxt-labs/patra-templates": ["@cntxt-labs/patra-templates@file:../patra/templates", {}],
   }
 }

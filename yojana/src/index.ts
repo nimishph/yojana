@@ -49,18 +49,6 @@ export {
 } from './project.ts';
 export { type RefreshedFile, type RefreshReport, refresh } from './refresh.ts';
 export {
-  commentForm,
-  editForm,
-  errorFragment,
-  escapeHtml,
-  type ReviewContext,
-  rejectForm,
-  renderMarkdown,
-  renderSection,
-  review,
-  reviewContext,
-} from './review.ts';
-export {
   REVIEW_TEMPLATE,
   type ReviewAnswer,
   type ReviewIntent,

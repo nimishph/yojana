@@ -1,13 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { WorkLinkPort } from '@cntxt-labs/yojana-core';
@@ -36,7 +28,7 @@ const noWork: WorkLinkPort = {
 
 let root = '';
 let server: ReviewServer;
-const planUrl = () => `${server.url}/plan/plan%2Flive`;
+const DOC = encodeURIComponent('plan/live');
 
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'yojana-serve-'));
@@ -61,141 +53,83 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-/** The revision an edit form is opened on, as the page would get it. */
-const revisionOf = async (requirement: string): Promise<string> => {
-  const form = await (await fetch(`${planUrl()}/form/edit/${requirement}`)).text();
-  return /name="revision" value="([^"]+)"/.exec(form)?.[1] ?? '';
-};
-
-/** Post the way htmx does: form-encoded, with the page's token header. */
 const post = (action: string, fields: Record<string, string>, token = server.token) =>
-  fetch(`${server.url}/api/${action}`, {
+  fetch(`${server.url}/i/review-document/${DOC}/${action}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-yojana-token': token },
+    headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-patra-token': token },
     body: new URLSearchParams(fields),
   });
 
-const planText = () => readFileSync(join(root, 'plans', 'live.md'), 'utf8');
+/** The revision a section shows, read from the page as a person's browser would see it. */
+async function versionOf(id: string): Promise<string> {
+  const page = await (await fetch(`${server.url}/d/review-document/${DOC}`)).text();
+  const match = new RegExp(`data-patra-key="${id}"[^>]*data-patra-version="([^"]+)"`).exec(page);
+  return match?.[1] ?? '';
+}
 
-describe('review --serve (htmx)', () => {
-  test('serves the page with htmx, its token, and form links; and htmx itself', async () => {
-    expect(await (await fetch(server.url)).text()).toContain('/plan/plan%2Flive');
-    const page = await (await fetch(planUrl())).text();
-    expect(page).toContain('<script src="/static/htmx.js"></script>');
-    expect(page).toContain(server.token);
-    expect(page).toContain('hx-get="/plan/plan%2Flive/form/edit/alpha"');
-    expect(page).toContain('id="selbar"');
-    const htmx = await fetch(`${server.url}/static/htmx.js`);
-    expect(htmx.headers.get('content-type')).toContain('javascript');
-    expect(await htmx.text()).toContain('htmx');
-    expect((await fetch(`${server.url}/plan/plan%2Fnone`)).status).toBe(404);
+describe('review --serve on patra', () => {
+  test('lists plans with their pages, and serves a plan through the review-document template', async () => {
+    const [plan] = await server.plans();
+    expect(plan).toMatchObject({ id: 'plan/live', status: 'accepted', requirements: 2 });
+    const response = await fetch(plan?.url ?? '');
+    expect(response.status).toBe(200);
+    const page = await response.text();
+    expect(page).toContain('<script src="/assets/htmx.js"></script>');
+    expect(page).toContain('data-patra-part="section" data-patra-key="alpha"');
+    expect(page).toContain('Alpha as <code>planned</code>.');
+    expect((await fetch(`${server.url}/d/review-document/plan%2Fnone`)).status).toBe(404);
   });
 
-  test('forms come from the server, with the quote from a selection', async () => {
-    const commentForm = await (
-      await fetch(`${planUrl()}/form/comment/alpha?quote=${encodeURIComponent('as planned')}`)
-    ).text();
-    expect(commentForm).toContain('hx-post="/api/comment"');
-    expect(commentForm).toContain('<blockquote>as planned</blockquote>');
-    const editForm = await (await fetch(`${planUrl()}/form/edit/alpha`)).text();
-    expect(editForm).toContain('Alpha as `planned`.');
-    expect((await fetch(`${planUrl()}/form/edit/nope`)).status).toBe(404);
-  });
-
-  test('writes without the token are refused and change nothing', async () => {
-    const before = planText();
-    const response = await post('edit', { planId: 'plan/live', requirement: 'alpha' }, 'wrong');
-    expect(response.status).toBe(403);
-    expect(planText()).toBe(before);
-  });
-
-  test('a comment on a rendered selection lands and comes back as the swapped section', async () => {
-    // The page shows `planned` without backticks; the selection carries none.
-    const response = await post('comment', {
-      planId: 'plan/live',
-      requirement: 'alpha',
-      body: 'Why alpha first?',
-      quote: 'as planned',
+  test('an edit writes the plan file and swaps the section; a stale one comes back with why', async () => {
+    const version = await versionOf('beta');
+    expect(version).toMatch(/^r_/);
+    const response = await post('edit', {
+      _key: 'beta',
+      _version: version,
+      title: 'beta',
+      text: 'Beta, sharpened.',
     });
     expect(response.status).toBe(200);
-    expect(response.headers.get('HX-Retarget')).toBe('[id="alpha"]');
-    expect(response.headers.get('HX-Reswap')).toBe('outerHTML');
-    const section = await response.text();
-    expect(section).toContain('Why alpha first?');
-    expect(section).toContain('<section class="req" id="alpha">');
-  });
-
-  test('a refused comment comes back as the form, text kept, with the reason', async () => {
-    const response = await post('comment', {
-      planId: 'plan/live',
-      requirement: 'alpha',
-      body: 'Keep me.',
-      quote: 'nowhere in the text',
-    });
-    expect(response.status).toBe(400);
-    const form = await response.text();
-    expect(form).toContain('Keep me.');
-    expect(form).toContain('class="error"');
-  });
-
-  test('an edit lands in the file and swaps the section; the old revision is then refused', async () => {
-    const shown = await revisionOf('alpha');
-    const saved = await post('edit', {
-      planId: 'plan/live',
-      requirement: 'alpha',
-      revision: shown,
-      title: 'alpha',
-      text: 'Alpha, edited on the page.',
-    });
-    expect(saved.status).toBe(200);
-    expect(await saved.text()).toContain('Alpha, edited on the page.');
-    expect(planText()).toContain('Alpha, edited on the page.');
+    expect(response.headers.get('HX-Retarget')).toContain('data-patra-key="beta"');
+    expect(await response.text()).toContain('Beta, sharpened.');
+    expect(readFileSync(join(root, 'plans', 'live.md'), 'utf8')).toContain('Beta, sharpened.');
 
     const stale = await post('edit', {
-      planId: 'plan/live',
-      requirement: 'alpha',
-      revision: shown,
-      title: 'alpha',
-      text: 'A late edit.',
+      _key: 'beta',
+      _version: version,
+      title: 'beta',
+      text: 'Late',
     });
     expect(stale.status).toBe(409);
     const form = await stale.text();
-    expect(form).toContain('It now reads:');
-    expect(form).toContain('A late edit.');
+    expect(form).toContain('data-patra-form="edit"');
+    expect(form).toContain('It now reads: “Beta, sharpened.”');
   });
 
-  test('suggestions open changes; accept applies one, the other can only be rejected', async () => {
-    const shown = await revisionOf('beta');
-    const suggest = (text: string) =>
-      post('suggest', {
-        planId: 'plan/live',
-        requirement: 'beta',
-        revision: shown,
-        title: 'beta',
-        text,
-        why: 'Sharper wording.',
-      });
-    expect((await suggest('Beta, as suggested.')).headers.get('HX-Refresh')).toBe('true');
-    expect((await suggest('Beta, another idea.')).headers.get('HX-Refresh')).toBe('true');
-    const ids = readdirSync(join(root, 'changes'))
-      .filter((f) => f.endsWith('.md'))
-      .map((f) => f.slice(0, -'.md'.length));
-    const proposes = (id: string, words: string) =>
-      readFileSync(join(root, 'changes', `${id}.md`), 'utf8').includes(words);
-    const accepted = ids.find((id) => proposes(id, 'as suggested')) ?? '';
-    const rejected = ids.find((id) => proposes(id, 'another idea')) ?? '';
-    expect(await (await fetch(planUrl())).text()).toContain('Open changes');
+  test('suggest, accept and comment ask for a reload, and land in the log and files', async () => {
+    const suggested = await post('suggest', {
+      _key: 'alpha',
+      _version: await versionOf('alpha'),
+      title: 'alpha',
+      text: 'Alpha, revised.',
+      why: 'clearer',
+    });
+    expect(suggested.headers.get('HX-Refresh')).toBe('true');
+    const [change] = readdirSync(join(root, 'changes')).filter((f) => f.endsWith('.md'));
+    const accepted = await post('accept', { _key: (change ?? '').replace(/\.md$/, '') });
+    expect(accepted.headers.get('HX-Refresh')).toBe('true');
+    expect(readFileSync(join(root, 'plans', 'live.md'), 'utf8')).toContain('Alpha, revised.');
 
-    expect((await post('accept', { changeId: accepted })).headers.get('HX-Refresh')).toBe('true');
-    expect(planText()).toContain('Beta, as suggested.');
-    expect(existsSync(join(root, 'changes', `${accepted}.md`))).toBe(false);
+    const commented = await post('comment', { _key: 'alpha', body: 'Good.', quote: 'revised' });
+    expect(commented.headers.get('HX-Refresh')).toBe('true');
+    const page = await (await fetch(`${server.url}/d/review-document/${DOC}`)).text();
+    expect(page).toContain('<mark data-mark="1">revised</mark>');
+    expect(page).toContain('page-user');
+  });
 
-    // Written against the same revision, the other one can no longer apply.
-    const refused = await post('accept', { changeId: rejected });
-    expect(refused.status).toBe(409);
-    expect(await refused.text()).toContain('changed since this change was opened');
-    expect((await post('reject', { changeId: rejected, reason: '' })).status).toBe(400);
-    expect((await post('reject', { changeId: rejected, reason: 'Superseded.' })).status).toBe(200);
-    expect(readdirSync(join(root, 'changes', 'abandoned'))[0]).toContain(rejected);
+  test('a refused action answers with its reason; writes need the token', async () => {
+    const refused = await post('reject', { _key: 'no-such-change', reason: 'x' });
+    expect(refused.status).toBe(400);
+    expect((await post('comment', { _key: 'alpha', body: 'x' }, 'wrong')).status).toBe(403);
   });
 });

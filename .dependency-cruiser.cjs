@@ -66,5 +66,8 @@ module.exports = {
     doNotFollow: { path: 'node_modules' },
     tsConfig: { fileName: 'tsconfig.json' },
     tsPreCompilationDeps: true,
+    // Linked packages (patra, via bun link) resolve to their own repo; they are dependencies,
+    // not code reaching above this directory, so keep them as node_modules paths.
+    preserveSymlinks: true,
   },
 };

@@ -20,6 +20,13 @@ It is part of the cntxt-labs set: **bd** for work, **medha** for rules, **anvesa
 
 ## Develop
 
+The review page is drawn by [patra](../patra) (see [ADR-001](docs/adr-001-patra-split.md)), a
+sibling repository linked rather than published. Register its packages once:
+
+```sh
+(cd ../patra && bun install && for p in patra-core patra-serve templates themes; do (cd $p && bun link); done)
+```
+
 ```sh
 bun install
 bun run check      # lint, typecheck, package boundaries, tests
