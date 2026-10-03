@@ -53,6 +53,15 @@ export {
   reviewContext,
 } from './review.ts';
 export {
+  type DecisionRequest,
+  REVIEW_TEMPLATE,
+  type ReviewAnswer,
+  type ReviewIntent,
+  type ReviewSession,
+  type ReviewSessionOptions,
+  reviewSession,
+} from './session.ts';
+export {
   type FileState,
   type OpenChange,
   type PlanReport,
