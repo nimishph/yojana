@@ -217,7 +217,7 @@ Built and tested on two clones of anvesa: the parser, the merge-safe log, ingest
 changes, claim checks through anvesa, progress from bd, status, refresh and repair.
 
 Dogfooding anvesa's own roadmap found that 7 of its 8 claims already hold in the code while all 7
-beads were still open. Next, from that run: link each requirement to its work items so status can
-flag "claims hold, bead open" (yoj-nw5); an
-importer for existing roadmaps (yoj-04r). Later: the HTML review renderer (yoj-djd), OpenSpec
-import/export, git-ref and Dolt sync, a medha rule sink, and a Claude Code plugin.
+beads were still open. Two follow-ups from that run are built: `text` claims, and requirement links
+that make status say "close?" for each such bead (six on anvesa's roadmap). Next: an importer for
+existing roadmaps (yoj-04r) and the HTML review renderer (yoj-djd). Later: OpenSpec import/export,
+git-ref and Dolt sync, a medha rule sink, and a Claude Code plugin.
