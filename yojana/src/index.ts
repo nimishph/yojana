@@ -14,6 +14,7 @@ export {
   type PlanFileUpdate,
 } from './changes.ts';
 export { type CheckReport, check, type PlanCheck } from './check.ts';
+export { type CommentResult, comment } from './comment.ts';
 export {
   type FileReport,
   type IngestOptions,
@@ -27,6 +28,7 @@ export {
 } from './ingest.ts';
 export { type ItemProgress, type PlanProgress, progress } from './progress.ts';
 export { type RefreshedFile, type RefreshReport, refresh } from './refresh.ts';
+export { escapeHtml, renderMarkdown, review } from './review.ts';
 export {
   type FileState,
   type OpenChange,

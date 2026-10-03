@@ -9,6 +9,7 @@ import {
   type ChangeProblem,
   type CheckReport,
   check,
+  comment,
   ensureGitAttributes,
   type FileReport,
   type IngestReport,
@@ -19,6 +20,7 @@ import {
   openChange,
   openWorkspace,
   refresh,
+  review,
   type StatusReport,
   settleChangeFile,
   status,
@@ -40,6 +42,8 @@ Usage:
   yojana refresh                            bring log changes into plan files that fell behind
   yojana status [plan] [--check]            plans, progress, pending edits, open changes
   yojana repair                             keep a corrupt log's readable events, move the rest aside
+  yojana comment <plan> <req> "<text>"      note on a requirement [--quote "<span>"] [--reply <id>]
+  yojana review [plan] [--check] [--out f]  write an HTML review page (.yojana/review/<plan>.html)
   yojana import <file> --id <plan-id>       start a plan from an existing Markdown roadmap
                 [--prefix <bead-prefix>] [--out <path>] [--force]
   yojana check [plan] [--strict]            verify plan claims against the code
@@ -82,6 +86,8 @@ interface Flags {
   readonly prefix: string | undefined;
   readonly out: string | undefined;
   readonly force: boolean;
+  readonly quote: string | undefined;
+  readonly reply: string | undefined;
   readonly positional: readonly string[];
 }
 
@@ -101,6 +107,8 @@ function parseFlags(argv: readonly string[]): Flags {
     prefix: undefined as string | undefined,
     out: undefined as string | undefined,
     force: false,
+    quote: undefined as string | undefined,
+    reply: undefined as string | undefined,
     positional: [] as string[],
   };
   for (let i = 0; i < argv.length; i++) {
@@ -118,6 +126,8 @@ function parseFlags(argv: readonly string[]): Flags {
     else if (arg === '--prefix') flags.prefix = value();
     else if (arg === '--out') flags.out = value();
     else if (arg === '--force') flags.force = true;
+    else if (arg === '--quote') flags.quote = value();
+    else if (arg === '--reply') flags.reply = value();
     else if (arg === '--json') flags.json = true;
     else if (arg === '--trust-file') flags.trustFile = true;
     else if (arg === '--all') flags.all = true;
@@ -402,6 +412,88 @@ function runCheck(flags: Flags, write: Write): Promise<number> {
   });
 }
 
+// comment
+
+function runComment(flags: Flags, write: Write): Promise<number> {
+  const [planId, requirement, ...words] = flags.positional;
+  const body = words.join(' ');
+  if (planId === undefined || requirement === undefined || body === '') {
+    throw new YojanaError(
+      'CLI_USAGE',
+      'usage: yojana comment <plan> <requirement> "<text>" [--quote "<span>"] [--reply <id>]',
+    );
+  }
+  return withWorkspace(flags, async (ws) => {
+    const result = await comment({
+      store: ws.store,
+      planId,
+      requirement,
+      body,
+      author: actor(),
+      quote: flags.quote,
+      replyTo: flags.reply,
+    });
+    if (!result.ok) {
+      emit(flags, write, result, `${result.code}: ${result.message}\n`);
+      return 1;
+    }
+    const a = result.annotation;
+    emit(flags, write, result, `${a.id}  on ${planId} ${a.requirement} (revision ${a.revision})\n`);
+    return 0;
+  });
+}
+
+// review
+
+function runReview(flags: Flags, write: Write): Promise<number> {
+  return withWorkspace(flags, async (ws) => {
+    const state = foldLog(await ws.store.events());
+    const [named] = flags.positional;
+    const planIds = named === undefined ? [...state.plans.keys()] : [named];
+    if (planIds.length === 0) {
+      write('no plans in the log; run yojana ingest first\n');
+      return 1;
+    }
+    const checks = flags.runCheck
+      ? await check({ store: ws.store, verifiers: verifiers(flags.root), planId: named })
+      : undefined;
+    const report = await status({
+      store: ws.store,
+      parser: ws.parser,
+      bases: ws.bases,
+      files: loadPlanFiles(flags.root, ws.plansDir),
+      worklink: new BdWorkLink(spawnBd(process.env.BD_BIN ?? 'bd', flags.root)),
+      checks,
+      now: Date.now(),
+      staleDays: flags.staleDays,
+      planId: named,
+    });
+    const written: string[] = [];
+    for (const planId of planIds) {
+      const html = await review({
+        store: ws.store,
+        planId,
+        status: report,
+        checks: checks?.plans.find((p) => p.planId === planId)?.results,
+        generatedAt: Date.now(),
+      });
+      if (html === undefined) {
+        throw new YojanaError('PLAN_NOT_FOUND', `the log has no plan ${planId}`);
+      }
+      const name = planId.split('/').at(-1) ?? planId;
+      const out =
+        flags.out !== undefined && planIds.length === 1
+          ? resolve(flags.root, flags.out)
+          : join(flags.root, '.yojana', 'review', `${name}.html`);
+      mkdirSync(join(out, '..'), { recursive: true });
+      writeFileSync(out, html);
+      written.push(toSource(flags.root, out));
+    }
+    emit(flags, write, { written }, `${written.map((w) => `wrote ${w}`).join('\n')}\n`);
+    return 0;
+  });
+}
+
 // import
 
 function runImport(flags: Flags, write: Write): number {
@@ -666,6 +758,8 @@ export async function run(argv: readonly string[], write: Write): Promise<number
     if (command === 'refresh') return await runRefresh(flags(), write);
     if (command === 'repair') return await runRepair(flags(), write);
     if (command === 'import') return runImport(flags(), write);
+    if (command === 'comment') return await runComment(flags(), write);
+    if (command === 'review') return await runReview(flags(), write);
   } catch (error) {
     if (error instanceof YojanaError) {
       const { code, message, hint } = error;

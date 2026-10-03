@@ -189,10 +189,16 @@ keeping both sides' lines (`merge=union`):
 
 ## Review surface
 
-The HTML renderer turns a plan into a review page: requirements, claim results, linked bead status,
-and comment threads. A comment is an `annotation-added` event anchored to a requirement id and
-revision (optionally a quoted span). When that requirement gets a new revision the comment shows as
-outdated rather than disappearing or silently re-attaching.
+`yojana review [plan] [--check]` writes a self-contained HTML page per plan to `.yojana/review/`
+(git-ignored): each requirement with its claim results, linked beads and close?/reopen? flags, and
+comment threads. `yojana comment <plan> <req> "<text>" [--quote "<span>"] [--reply <id>]` records
+an `annotation-added` event anchored to the requirement's current revision; a quote must appear in
+the text and is highlighted on the page. When the requirement gets a new revision, its comments are
+marked outdated and the highlight is dropped, rather than the comment disappearing or attaching to
+text it was not about. Plan text is escaped on the page; it is data, never markup.
+
+Comments are added from the CLI for now. Commenting from inside the page needs something to write
+the event back, such as a local `review --serve`; that is a later step.
 
 ## Commands
 
@@ -206,6 +212,8 @@ yojana refresh                            bring log changes into plan files that
 yojana status [plan] [--check]            plans, progress, pending edits, open changes
 yojana check [plan] [--strict]            verify claims against the code
 yojana repair                             recover a corrupt log
+yojana comment <plan> <req> "<text>"      note on a requirement (--quote, --reply)
+yojana review [plan] [--check]            HTML review page in .yojana/review/
 yojana import <file> --id <plan-id>       start a plan from an existing Markdown roadmap
 ```
 
@@ -224,7 +232,7 @@ Built and tested on two clones of anvesa: the parser, the merge-safe log, ingest
 changes, claim checks through anvesa, progress from bd, status, refresh and repair.
 
 Dogfooding anvesa's own roadmap found that 7 of its 8 claims already hold in the code while all 7
-beads were still open. Two follow-ups from that run are built: `text` claims, and requirement links
-that make status say "close?" for each such bead (six on anvesa's roadmap). Next: an importer for
-existing roadmaps (yoj-04r) and the HTML review renderer (yoj-djd). Later: OpenSpec import/export,
-git-ref and Dolt sync, a medha rule sink, and a Claude Code plugin.
+beads were still open. All three follow-ups from that run are built: `text` claims, requirement links
+that make status say "close?" for each such bead (six on anvesa's roadmap), and `import`. The review page is
+built too (comments from the CLI). Later: commenting from the page itself, OpenSpec import/export, git-ref and Dolt sync, a medha rule sink,
+and a Claude Code plugin.

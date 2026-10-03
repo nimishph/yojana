@@ -97,8 +97,11 @@ base/*.jsonl merge=union
 
 /** Make sure `.yojana/.gitattributes` turns on union merges for the log and the bases. */
 export function ensureGitAttributes(root: string): void {
-  const path = join(root, '.yojana', '.gitattributes');
-  if (existsSync(path)) return;
   mkdirSync(join(root, '.yojana'), { recursive: true });
-  writeFileSync(path, GIT_ATTRIBUTES);
+  const attributes = join(root, '.yojana', '.gitattributes');
+  if (!existsSync(attributes)) writeFileSync(attributes, GIT_ATTRIBUTES);
+  // Review pages are generated from the log and plans; they are not history.
+  const ignore = join(root, '.yojana', '.gitignore');
+  if (!existsSync(ignore))
+    writeFileSync(ignore, '# Written by yojana: generated review pages.\nreview/\n');
 }

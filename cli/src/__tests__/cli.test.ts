@@ -159,6 +159,19 @@ describe('yojana CLI, start to finish', () => {
     expect((await yojana('repair')).out).toContain('nothing to repair');
   });
 
+  test('comment, then review writes an ignored HTML page with the note', async () => {
+    const noted = await yojana('comment', 'plan/demo', 'readme', 'Link the docs site too.');
+    expect(noted.code).toBe(0);
+    expect(noted.out).toMatch(/^n_[0-9a-f]+ {2}on plan\/demo readme/);
+    expect((await yojana('comment', 'plan/demo', 'nope', 'x')).out).toContain('NOT_FOUND');
+
+    const reviewed = await yojana('review', 'plan/demo');
+    expect(reviewed.code).toBe(0);
+    const html = readFileSync(join(root, '.yojana', 'review', 'demo.html'), 'utf8');
+    expect(html).toContain('Link the docs site too.');
+    expect(readFileSync(join(root, '.yojana', '.gitignore'), 'utf8')).toContain('review/');
+  });
+
   test('import writes a plan from a roadmap, and will not overwrite without --force', async () => {
     writeFileSync(
       join(root, 'ROADMAP.md'),
