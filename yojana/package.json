@@ -14,5 +14,9 @@
     "@cntxt-labs/yojana-markdown": "workspace:*",
     "@cntxt-labs/yojana-verify": "workspace:*"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@cntxt-labs/patra-core": "file:../../patra/patra-core",
+    "@cntxt-labs/patra-templates": "file:../../patra/templates"
+  }
 }

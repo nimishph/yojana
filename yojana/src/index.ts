@@ -28,6 +28,17 @@ export {
   type StatusOutcome,
 } from './ingest.ts';
 export { type ItemProgress, type PlanProgress, progress } from './progress.ts';
+export {
+  ACTIVITY_LIMIT,
+  ago,
+  type ProjectOptions,
+  projectReview,
+  type ReviewActivity,
+  type ReviewChange,
+  type ReviewDocument,
+  type ReviewSection,
+  type ReviewThread,
+} from './project.ts';
 export { type RefreshedFile, type RefreshReport, refresh } from './refresh.ts';
 export {
   commentForm,
