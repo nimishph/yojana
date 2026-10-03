@@ -34,6 +34,8 @@ export interface PlanState {
    */
   readonly contested: Map<RequirementId, (RevisionHash | undefined)[]>;
   readonly annotations: Annotation[];
+  /** Work items the plan names, from its latest `work-linked` event. */
+  workItems: readonly string[];
 }
 
 export type ChangeStatus = 'open' | 'archived' | 'abandoned';
@@ -75,6 +77,7 @@ function planFor(state: FoldState, id: string): PlanState {
       heads: new Map(),
       contested: new Map(),
       annotations: [],
+      workItems: [],
     };
     state.plans.set(id, plan);
   }
@@ -184,6 +187,10 @@ export function applyEvent(state: FoldState, event: YojanaEvent): void {
         at: event.at,
         seq,
       });
+      return;
+    }
+    case 'work-linked': {
+      planFor(state, event.planId).workItems = event.workItems;
       return;
     }
     case 'annotation-added': {

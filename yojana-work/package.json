@@ -1,0 +1,14 @@
+{
+  "name": "@cntxt-labs/yojana-work",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "WorkLinkPort adapters: plan progress read from bd (beads).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@cntxt-labs/yojana-core": "workspace:*"
+  },
+  "license": "MIT"
+}

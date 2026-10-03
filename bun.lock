@@ -21,6 +21,7 @@
         "@cntxt-labs/yojana": "workspace:*",
         "@cntxt-labs/yojana-core": "workspace:*",
         "@cntxt-labs/yojana-verify": "workspace:*",
+        "@cntxt-labs/yojana-work": "workspace:*",
       },
     },
     "yojana": {
@@ -66,6 +67,13 @@
         "@cntxt-labs/yojana-core": "workspace:*",
       },
     },
+    "yojana-work": {
+      "name": "@cntxt-labs/yojana-work",
+      "version": "0.0.0",
+      "dependencies": {
+        "@cntxt-labs/yojana-core": "workspace:*",
+      },
+    },
   },
   "packages": {
     "@biomejs/biome": ["@biomejs/biome@2.5.15", "", { "optionalDependencies": { "@biomejs/cli-darwin-arm64": "2.5.15", "@biomejs/cli-darwin-x64": "2.5.15", "@biomejs/cli-linux-arm64": "2.5.15", "@biomejs/cli-linux-arm64-musl": "2.5.15", "@biomejs/cli-linux-x64": "2.5.15", "@biomejs/cli-linux-x64-musl": "2.5.15", "@biomejs/cli-win32-arm64": "2.5.15", "@biomejs/cli-win32-x64": "2.5.15" }, "bin": { "biome": "bin/biome" } }, "sha512-WZTW4slm/pdkh92K6t/3aEN++44JD1PQ7squ7RCMLI1flHGl43DVOIGXvCjHiZgBMO1V4uYxoFNtqrIA4qGuIQ=="],
@@ -99,6 +107,8 @@
     "@cntxt-labs/yojana-sync": ["@cntxt-labs/yojana-sync@workspace:yojana-sync"],
 
     "@cntxt-labs/yojana-verify": ["@cntxt-labs/yojana-verify@workspace:yojana-verify"],
+
+    "@cntxt-labs/yojana-work": ["@cntxt-labs/yojana-work@workspace:yojana-work"],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 

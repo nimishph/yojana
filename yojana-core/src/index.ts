@@ -46,4 +46,4 @@ export {
 export type { OpenResult, StorePort } from './store-port.ts';
 export type { PullResult, PushResult, SyncPort, SyncState, SyncStatus } from './sync-port.ts';
 export type { ClaimOutcome, ClaimResult, VerifierPort } from './verifier-port.ts';
-export type { WorkItem, WorkItemState, WorkLinkPort } from './worklink-port.ts';
+export type { WorkItem, WorkItemState, WorkLinkPort, WorkLookup } from './worklink-port.ts';

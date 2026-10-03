@@ -24,6 +24,7 @@ export {
   type RequirementOutcome,
   type StatusOutcome,
 } from './ingest.ts';
+export { type ItemProgress, type PlanProgress, progress } from './progress.ts';
 export {
   ensureGitAttributes,
   loadPlanFiles,

@@ -1,5 +1,5 @@
 // Boundaries for the yojana packages. The graph is one-way:
-// yojana -> { core, store, sync, markdown, verify }; store, sync, markdown, verify -> core; cli -> { yojana, core }.
+// yojana -> { core, store, sync, markdown, verify }; store, sync, markdown, verify, work -> core; cli -> { yojana, core }.
 // Cross-package imports go through a package's public entry point (src/index.ts), never its internals.
 
 /** package directory -> the only workspace packages it may import. */
@@ -9,9 +9,17 @@ const ALLOWED = {
   'yojana-sync': ['yojana-core'],
   'yojana-markdown': ['yojana-core'],
   'yojana-verify': ['yojana-core'],
+  'yojana-work': ['yojana-core'],
   // Engine facade: composes the ports into ingest / status / archive / check.
-  yojana: ['yojana-core', 'yojana-store', 'yojana-sync', 'yojana-markdown', 'yojana-verify'],
-  cli: ['yojana', 'yojana-core', 'yojana-verify'],
+  yojana: [
+    'yojana-core',
+    'yojana-store',
+    'yojana-sync',
+    'yojana-markdown',
+    'yojana-verify',
+    'yojana-work',
+  ],
+  cli: ['yojana', 'yojana-core', 'yojana-verify', 'yojana-work'],
 };
 
 const names = Object.keys(ALLOWED);

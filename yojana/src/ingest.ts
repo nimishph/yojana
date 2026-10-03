@@ -197,6 +197,14 @@ export async function ingest(options: IngestOptions): Promise<IngestReport> {
           logStatus === undefined ? `created from ${file.source}` : `edited in ${file.source}`,
       });
     }
+    // Work items are plan metadata, not requirements: the file's list replaces the log's when
+    // they differ (compared as sets, so reordering the list is not a change).
+    const sameSet = (a: readonly string[], b: readonly string[]) =>
+      JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+    const workChanged = !sameSet(plan.workItems, logPlan?.workItems ?? []);
+    if (workChanged) {
+      events.push({ type: 'work-linked', planId: plan.id, workItems: plan.workItems });
+    }
     const byId = new Map(plan.requirements.map((r) => [r.id, r]));
     for (const o of outcomes) {
       if (o.movement !== 'edited' && o.movement !== 'resolved') continue;

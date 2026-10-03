@@ -28,7 +28,13 @@ export type YojanaEventInput =
       readonly to: PlanStatus;
       readonly reason: string;
     }
-  | { readonly type: 'annotation-added'; readonly planId: string; readonly annotation: Annotation };
+  | { readonly type: 'annotation-added'; readonly planId: string; readonly annotation: Annotation }
+  | {
+      /** The plan's work items (bead ids), as the plan file lists them. */
+      readonly type: 'work-linked';
+      readonly planId: string;
+      readonly workItems: readonly string[];
+    };
 
 export type YojanaEvent = YojanaEventInput & {
   /**
