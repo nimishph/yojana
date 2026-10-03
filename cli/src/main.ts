@@ -38,6 +38,7 @@ Usage:
   yojana abandon <change> --reason <text>   close a change without applying it
   yojana refresh                            bring log changes into plan files that fell behind
   yojana status [plan] [--check]            plans, progress, pending edits, open changes
+  yojana repair                             keep a corrupt log's readable events, move the rest aside
   yojana check [plan] [--strict]            verify plan claims against the code
   yojana --version
 
@@ -49,6 +50,10 @@ Options:
   --strict           check: also fail when a claim cannot be verified
   --check            status: also run the claim checks
   --stale-days <n>   status: an open change older than this is stale (default 14)
+
+Exit codes: 0 done; 1 refused, violated, invalid or failed (the output says which); 2 usage error.
+Errors carry a code (STORE_CORRUPT, CLI_USAGE, ...) and usually a hint; with --json they are
+printed as {"error": {"code", "message", "hint"}}.
 
 Claims run through anvesa (wql, dependents) and progress through bd; set ANVESA_BIN or BD_BIN if
 they are not on PATH.
@@ -126,15 +131,19 @@ function toSource(root: string, path: string): string {
 /** Open the workspace and its log; refuse to go on with a corrupt log. */
 async function withWorkspace(
   flags: Flags,
-  write: Write,
   body: (workspace: Workspace) => Promise<number>,
+  options?: { readonly allowCorrupt?: boolean },
 ): Promise<number> {
   const workspace = openWorkspace(flags.root, { plansDir: flags.plans, changesDir: flags.changes });
   const opened = await workspace.store.open();
   ensureGitAttributes(flags.root);
-  if (opened.status === 'corrupt') {
-    write(`${opened.source} is unreadable from event ${opened.atSeq}; nothing was done\n`);
-    return 1;
+  if (opened.status === 'corrupt' && options?.allowCorrupt !== true) {
+    await workspace.store.close();
+    throw new YojanaError(
+      'STORE_CORRUPT',
+      `${opened.source} is unreadable from event ${opened.atSeq}; nothing was done`,
+      { hint: 'run yojana repair: it keeps every readable event and moves the rest aside' },
+    );
   }
   try {
     return await body(workspace);
@@ -208,7 +217,7 @@ function describeIngest(report: IngestReport): string {
 }
 
 function runIngest(flags: Flags, write: Write): Promise<number> {
-  return withWorkspace(flags, write, async (ws) => {
+  return withWorkspace(flags, async (ws) => {
     const report = await ingest({
       store: ws.store,
       parser: ws.parser,
@@ -227,7 +236,7 @@ function runIngest(flags: Flags, write: Write): Promise<number> {
 function runChangeOpen(flags: Flags, write: Write): Promise<number> {
   const [, file] = flags.positional;
   if (file === undefined) throw new YojanaError('CLI_USAGE', 'usage: yojana change open <file>');
-  return withWorkspace(flags, write, async (ws) => {
+  return withWorkspace(flags, async (ws) => {
     const path = resolve(flags.root, file);
     const source = toSource(flags.root, path);
     let text: string;
@@ -265,7 +274,7 @@ function runChangeOpen(flags: Flags, write: Write): Promise<number> {
 // changes
 
 function runChanges(flags: Flags, write: Write): Promise<number> {
-  return withWorkspace(flags, write, async (ws) => {
+  return withWorkspace(flags, async (ws) => {
     const state = foldLog(await ws.store.events());
     const rows = [...state.changes.values()].filter((c) => flags.all || c.status === 'open');
     const value = rows.map((c) => ({
@@ -294,7 +303,7 @@ function runChanges(flags: Flags, write: Write): Promise<number> {
 function runArchive(flags: Flags, write: Write): Promise<number> {
   const [changeId] = flags.positional;
   if (changeId === undefined) throw new YojanaError('CLI_USAGE', 'usage: yojana archive <change>');
-  return withWorkspace(flags, write, async (ws) => {
+  return withWorkspace(flags, async (ws) => {
     const result: ArchiveResult = await archiveChange({
       store: ws.store,
       bases: ws.bases,
@@ -369,7 +378,7 @@ function verifiers(root: string): VerifierPort[] {
 
 function runCheck(flags: Flags, write: Write): Promise<number> {
   const [planId] = flags.positional;
-  return withWorkspace(flags, write, async (ws) => {
+  return withWorkspace(flags, async (ws) => {
     const report = await check({ store: ws.store, verifiers: verifiers(flags.root), planId });
     emit(flags, write, report, describeCheck(report));
     if (report.violated > 0) return 1;
@@ -377,10 +386,28 @@ function runCheck(flags: Flags, write: Write): Promise<number> {
   });
 }
 
+// repair
+
+function runRepair(flags: Flags, write: Write): Promise<number> {
+  return withWorkspace(
+    flags,
+    async (ws) => {
+      const result = await ws.repairLog();
+      const text =
+        result.quarantined === undefined
+          ? `the log is readable (${result.kept} events); nothing to repair\n`
+          : `kept ${result.kept} readable events; moved the unreadable rest to ${toSource(flags.root, result.quarantined)}\n`;
+      emit(flags, write, result, text);
+      return 0;
+    },
+    { allowCorrupt: true },
+  );
+}
+
 // refresh
 
 function runRefresh(flags: Flags, write: Write): Promise<number> {
-  return withWorkspace(flags, write, async (ws) => {
+  return withWorkspace(flags, async (ws) => {
     const report = await refresh({
       store: ws.store,
       parser: ws.parser,
@@ -492,7 +519,7 @@ function describeStatus(report: StatusReport, checks: CheckReport | undefined): 
 
 function runStatus(flags: Flags, write: Write): Promise<number> {
   const [planId] = flags.positional;
-  return withWorkspace(flags, write, async (ws) => {
+  return withWorkspace(flags, async (ws) => {
     const report = await status({
       store: ws.store,
       parser: ws.parser,
@@ -518,7 +545,7 @@ function runAbandon(flags: Flags, write: Write): Promise<number> {
   if (changeId === undefined) {
     throw new YojanaError('CLI_USAGE', 'usage: yojana abandon <change> --reason <text>');
   }
-  return withWorkspace(flags, write, async (ws) => {
+  return withWorkspace(flags, async (ws) => {
     const result: AbandonResult = await abandonChange({
       store: ws.store,
       changeId,
@@ -553,12 +580,16 @@ export async function run(argv: readonly string[], write: Write): Promise<number
     if (command === 'check') return await runCheck(flags(), write);
     if (command === 'status') return await runStatus(flags(), write);
     if (command === 'refresh') return await runRefresh(flags(), write);
+    if (command === 'repair') return await runRepair(flags(), write);
   } catch (error) {
     if (error instanceof YojanaError) {
+      const { code, message, hint } = error;
       write(
-        `${error.code}: ${error.message}${error.hint === undefined ? '' : `\n  hint: ${error.hint}`}\n`,
+        rest.includes('--json')
+          ? `${JSON.stringify({ error: { code, message, hint } }, null, 2)}\n`
+          : `${code}: ${message}${hint === undefined ? '' : `\n  hint: ${hint}`}\n`,
       );
-      return error.code === 'CLI_USAGE' ? 2 : 1;
+      return code === 'CLI_USAGE' ? 2 : 1;
     }
     throw error;
   }

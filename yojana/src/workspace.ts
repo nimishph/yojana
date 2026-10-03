@@ -10,7 +10,7 @@ import {
 import { basename, join, relative, sep } from 'node:path';
 import type { BasePort, ParserPort, StorePort } from '@cntxt-labs/yojana-core';
 import { MarkdownParser } from '@cntxt-labs/yojana-markdown';
-import { FileBaseStore, FileStore } from '@cntxt-labs/yojana-store';
+import { FileBaseStore, FileStore, type RepairResult } from '@cntxt-labs/yojana-store';
 import type { PlanFile } from './ingest.ts';
 
 /**
@@ -29,19 +29,23 @@ export interface Workspace {
   readonly store: StorePort;
   readonly bases: BasePort;
   readonly parser: ParserPort;
+  /** Keep every readable event of a corrupt log and move the rest to a side file. */
+  repairLog(): Promise<RepairResult>;
 }
 
 export function openWorkspace(
   root: string,
   options?: { readonly plansDir?: string | undefined; readonly changesDir?: string | undefined },
 ): Workspace {
+  const store = new FileStore({ path: join(root, '.yojana', 'log.jsonl') });
   return {
     root,
     plansDir: join(root, options?.plansDir ?? 'plans'),
     changesDir: join(root, options?.changesDir ?? 'changes'),
-    store: new FileStore({ path: join(root, '.yojana', 'log.jsonl') }),
+    store,
     bases: new FileBaseStore({ dir: join(root, '.yojana', 'base') }),
     parser: new MarkdownParser(),
+    repairLog: () => store.repair(),
   };
 }
 
