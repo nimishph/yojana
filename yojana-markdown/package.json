@@ -1,0 +1,14 @@
+{
+  "name": "@cntxt-labs/yojana-markdown",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Parser/renderer adapter: Markdown + YAML frontmatter + fenced yojana: blocks.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@cntxt-labs/yojana-core": "workspace:*"
+  },
+  "license": "MIT"
+}

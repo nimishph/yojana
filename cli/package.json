@@ -1,0 +1,15 @@
+{
+  "name": "@cntxt-labs/yojana-cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The yojana command line.",
+  "bin": {
+    "yojana": "./src/main.ts"
+  },
+  "dependencies": {
+    "@cntxt-labs/yojana": "workspace:*",
+    "@cntxt-labs/yojana-core": "workspace:*"
+  },
+  "license": "MIT"
+}

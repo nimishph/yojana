@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["bun"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+    "useUnknownInCatchVariables": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "paths": {
+      "@cntxt-labs/yojana-core": ["./yojana-core/src/index.ts"],
+      "@cntxt-labs/yojana-store": ["./yojana-store/src/index.ts"],
+      "@cntxt-labs/yojana-sync": ["./yojana-sync/src/index.ts"],
+      "@cntxt-labs/yojana-markdown": ["./yojana-markdown/src/index.ts"],
+      "@cntxt-labs/yojana": ["./yojana/src/index.ts"]
+    }
+  },
+  "include": ["*/src", "tooling/*.ts"],
+  "exclude": ["node_modules"]
+}

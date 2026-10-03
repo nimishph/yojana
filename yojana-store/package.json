@@ -1,0 +1,14 @@
+{
+  "name": "@cntxt-labs/yojana-store",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Revision-log stores: in-memory and append-only JSONL file.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@cntxt-labs/yojana-core": "workspace:*"
+  },
+  "license": "MIT"
+}

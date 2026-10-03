@@ -1,0 +1,219 @@
+<title>Yojana v0 Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single reading column with a narrow left gutter of section ids, like a spec with requirement anchors. */
+:root {
+  --bg: #f5f7f9;
+  --surface: #ffffff;
+  --ink: #18212b;
+  --muted: #5a6876;
+  --rule: #d8dfe6;
+  --accent: #2f4f9e;
+  --accent-soft: #e6ecf8;
+  --ok: #2c7a4b;
+  --warn: #a55a12;
+  --bad: #b23a3a;
+  --font-display: 'Spectral', Georgia, 'Times New Roman', serif;
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12161c; --surface: #1a2029; --ink: #e3e8ee; --muted: #9aa7b4; --rule: #2c3540;
+    --accent: #8fa9ec; --accent-soft: #222c40; --ok: #6cc28f; --warn: #e0a15e; --bad: #ec8a8a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12161c; --surface: #1a2029; --ink: #e3e8ee; --muted: #9aa7b4; --rule: #2c3540;
+  --accent: #8fa9ec; --accent-soft: #222c40; --ok: #6cc28f; --warn: #e0a15e; --bad: #ec8a8a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 400 16px/1.65 var(--font-body);
+  padding: 0 16px;
+}
+main { max-width: 760px; margin: 0 auto; padding-block: 48px 80px; display: grid; gap: 44px; }
+header { display: grid; gap: 12px; border-bottom: 1px solid var(--rule); padding-bottom: 28px; }
+.eyebrow { font: 500 12px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font: 600 clamp(34px, 6vw, 48px)/1.1 var(--font-display); margin: 0; text-wrap: balance; }
+.lede { font-size: 19px; color: var(--muted); margin: 0; max-width: 60ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 18px; font: 400 13px/1.4 var(--font-mono); color: var(--muted); }
+section { display: grid; gap: 14px; min-width: 0; }
+h2 { font: 600 26px/1.25 var(--font-display); margin: 0; text-wrap: balance; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+h2 .anchor { font: 400 13px/1 var(--font-mono); color: var(--accent); }
+h3 { font: 600 16px/1.3 var(--font-body); margin: 8px 0 0; }
+p, li { max-width: 66ch; }
+p { margin: 0; }
+ul, ol { margin: 0; padding-left: 1.25em; display: grid; gap: 6px; }
+code { font: 400 .88em/1 var(--font-mono); background: var(--accent-soft); color: var(--ink); padding: .12em .35em; border-radius: 3px; }
+pre { margin: 0; overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px 18px; font: 400 13.5px/1.55 var(--font-mono); }
+pre code { background: none; padding: 0; font-size: inherit; line-height: inherit; }
+.scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font: 500 12px/1.2 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+tr.self td { background: var(--accent-soft); font-weight: 500; }
+.principles { list-style: none; padding: 0; counter-reset: p; gap: 14px; }
+.principles li { counter-increment: p; display: grid; grid-template-columns: 28px 1fr; gap: 10px; }
+.principles li::before { content: counter(p); font: 600 18px/1.5 var(--font-display); color: var(--accent); }
+.principles b { font-weight: 600; }
+.lifecycle { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 500 13px/1 var(--font-mono); }
+.chip { padding: 6px 10px; border-radius: 999px; border: 1px solid var(--rule); background: var(--surface); }
+.chip.on { border-color: var(--accent); color: var(--accent); }
+.chip.end-ok { border-color: var(--ok); color: var(--ok); }
+.chip.end-off { border-style: dashed; color: var(--muted); }
+.arrow { color: var(--muted); }
+.conflict { margin: 0; display: grid; gap: 4px; border-left: 3px solid var(--bad); padding: 10px 14px; background: var(--surface); border-radius: 0 6px 6px 0; font: 400 13.5px/1.5 var(--font-mono); overflow-x: auto; }
+.conflict .k { color: var(--muted); }
+.conflict .bad { color: var(--bad); }
+.scope { list-style: none; padding: 0; gap: 10px; }
+.scope li { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: baseline; }
+.bead { font: 500 12.5px/1 var(--font-mono); color: var(--accent); white-space: nowrap; }
+.note { font-size: 14px; color: var(--muted); }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<main>
+  <header>
+    <div class="eyebrow">cntxt-labs · design · draft · 2026-10-03</div>
+    <h1>yojana: plans as checkable contracts</h1>
+    <p class="lede">Plain Markdown plans with an append-only log of every requirement revision. It catches conflicting edits, checks claims against the code, and reads progress from beads.</p>
+    <div class="meta"><span>repo: yojana/</span><span>epic: yoj-9fe</span><span>source: docs/design.md</span></div>
+  </header>
+
+  <section id="why">
+    <h2>Why <span class="anchor">#why</span></h2>
+    <p>Each cntxt-labs tool owns one layer of an agent's working context. Plans are the layer with no owner.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Tool</th><th>Layer</th><th>Answers</th></tr></thead>
+        <tbody>
+          <tr><td>bd</td><td>execution</td><td>what to do next</td></tr>
+          <tr><td>medha</td><td>rules</td><td>what has proven true</td></tr>
+          <tr><td>anvesa</td><td>code</td><td>what the code actually is</td></tr>
+          <tr class="self"><td>yojana</td><td>intent</td><td>what we decided, why, and whether the code still agrees</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>OpenSpec is the closest existing tool. Its specs are living files updated in place by deltas, with git as the history, and archived changes are kept forever. It has no answer for abandoned changes, for two changes editing the same requirement, or for specs that drift from the code. Yojana covers those three.</p>
+  </section>
+
+  <section id="principles">
+    <h2>Principles <span class="anchor">#principles</span></h2>
+    <ol class="principles">
+      <li><span><b>Not a VCS.</b> Git versions files. Yojana versions meaning: which requirement changed, from which base revision, in which change, and why.</span></li>
+      <li><span><b>Requirement-level revisions.</b> Each requirement has a stable id. Each version of its text is a revision: <code>r_</code> plus 16 hex characters of the sha256 of the normalised text.</span></li>
+      <li><span><b>The log is the source of truth.</b> Plan files are where you edit; every state rebuilds by folding the log. Same pattern as medha's episode log, duplicated rather than shared until it proves itself in both.</span></li>
+      <li><span><b>Report, then refuse ambiguity.</b> A conflict or a hand edit on a stale base is reported and refused, never resolved silently.</span></li>
+      <li><span><b>Markdown is edited, HTML is reviewed.</b> People and agents edit plain Markdown. Review happens in a rendered page with comments and highlights anchored to requirement revisions.</span></li>
+    </ol>
+  </section>
+
+  <section id="format">
+    <h2>File format <span class="anchor">#format</span></h2>
+    <p>Markdown with YAML frontmatter. Requirements are <code>##</code> headings with an explicit id. Machine-readable parts go in fenced <code>yojana:</code> blocks, which show as code on GitHub and parse without a JavaScript compiler.</p>
+<pre><code>---
+id: plan/plugin-packaging
+status: accepted        # draft | accepted | in-progress | realized | superseded | abandoned
+beads: [anv-yp2]
+---
+## Requirement: plugin loads without a global install {#req-no-global}
+The plugin's MCP server starts through npx when anvesa is not on PATH.
+
+```yojana:claim
+kind: wql
+expression: //file[@path=".claude-plugin/plugin.json"]
+expect: true
+```</code></pre>
+    <p class="note">MDX is not an editing format: agents edit it less reliably and it needs a compiler. It may return later as a render-only adapter.</p>
+  </section>
+
+  <section id="lifecycle">
+    <h2>Lifecycle <span class="anchor">#lifecycle</span></h2>
+    <p class="lifecycle">
+      <span class="chip">draft</span><span class="arrow">→</span>
+      <span class="chip on">accepted</span><span class="arrow">→</span>
+      <span class="chip on">in-progress</span><span class="arrow">→</span>
+      <span class="chip end-ok">realized</span>
+      <span class="arrow">or</span>
+      <span class="chip end-off">superseded</span>
+      <span class="chip end-off">abandoned</span>
+    </p>
+    <p>Every transition is an event with an actor and a reason. Progress comes from the linked beads and is never typed in. A change whose beads have not moved for a set number of days shows as stale.</p>
+  </section>
+
+  <section id="conflicts">
+    <h2>Changes and conflicts <span class="anchor">#conflicts</span></h2>
+    <p>A change is a set of deltas (<code>add</code>, <code>modify</code>, <code>remove</code>), each recorded against the revision it started from. Archive applies a change only if every base is still current:</p>
+    <ul>
+      <li>an <code>add</code> conflicts if the id already exists;</li>
+      <li>a <code>modify</code> or <code>remove</code> conflicts if the requirement has moved past the delta's base.</li>
+    </ul>
+    <figure class="conflict">
+      <span>yojana archive chg-dark-mode</span>
+      <span class="bad">refused: 1 requirement changed since this change was written</span>
+      <span><span class="k">requirement</span> req-no-global   <span class="k">op</span> modify</span>
+      <span><span class="k">expected</span>    r_3f9a1c0d77e2b415   <span class="k">actual</span> r_b20e44a9c1f0d3e8</span>
+    </figure>
+    <p>The check already exists as <code>findBaseConflicts</code> in <code>yojana-core</code>, with tests.</p>
+  </section>
+
+  <section id="ports">
+    <h2>Ports and adapters <span class="anchor">#ports</span></h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Port</th><th>Job</th><th>v0</th><th>Later</th></tr></thead>
+        <tbody>
+          <tr><td>StorePort</td><td>local append-only revision log</td><td>memory, JSONL file</td><td>SQLite</td></tr>
+          <tr><td>SyncPort</td><td>copy the log elsewhere</td><td>noop, file bundle</td><td>git ref <code>refs/yojana/*</code>, Dolt, HTTP/S3</td></tr>
+          <tr><td>ParserPort</td><td>files ⇄ plans</td><td>Markdown</td><td>OpenSpec import/export, HTML review, MDX render</td></tr>
+          <tr><td>VerifierPort</td><td>check claims against code</td><td>anvesa (<code>wql</code>, <code>dependents</code>)</td><td>shell command</td></tr>
+          <tr><td>WorkLinkPort</td><td>plan ⇄ execution</td><td>bd</td><td>others</td></tr>
+          <tr><td>RuleSink</td><td>proven decisions → rules</td><td>—</td><td>medha <code>propose</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Store and sync are separate ports, so a remote never becomes a second source of truth.</p>
+<pre><code>yojana-core      domain model, ports, conflict check (no dependencies)
+yojana-store     StorePort backends
+yojana-sync      SyncPort adapters
+yojana-markdown  ParserPort adapter
+yojana           engine: ingest, status, archive, check
+cli              the yojana command</code></pre>
+    <p class="note">dependency-cruiser enforces a one-way graph, and packages import each other only through <code>src/index.ts</code>.</p>
+  </section>
+
+  <section id="sync-files">
+    <h2>Keeping files and log in step <span class="anchor">#sync-files</span></h2>
+    <p><code>yojana ingest</code> compares plan files with the last recorded revision of each requirement and records new revisions. A Claude Code PostToolUse hook on edits under <code>plans/</code> runs it automatically. If a file was edited on top of a stale base, ingest refuses and explains. The file can always be regenerated from the log.</p>
+  </section>
+
+  <section id="review">
+    <h2>Review surface <span class="anchor">#review</span></h2>
+    <p>The HTML renderer turns a plan into a review page: requirements, claim results, bead status and comment threads. A comment is an <code>annotation-added</code> event anchored to a requirement id and revision, optionally with a quoted span. When the requirement gets a new revision, its comments show as outdated instead of vanishing or silently re-attaching.</p>
+  </section>
+
+  <section id="scope">
+    <h2>v0 scope <span class="anchor">#scope</span></h2>
+    <ul class="scope">
+      <li><span class="bead">yoj-9fe.1</span><span>Markdown parser: frontmatter, requirement headings, claim blocks</span></li>
+      <li><span class="bead">yoj-9fe.2</span><span>JSONL file store and a contract suite shared by every backend</span></li>
+      <li><span class="bead">yoj-9fe.3</span><span>Fold: rebuild plan heads and change state from the log</span></li>
+      <li><span class="bead">yoj-9fe.4</span><span><code>ingest</code>: record revisions for edited plan files</span></li>
+      <li><span class="bead">yoj-9fe.5</span><span><code>archive</code> with the base-revision conflict check, plus <code>abandon</code></span></li>
+      <li><span class="bead">yoj-9fe.6</span><span><code>check</code> through the anvesa verifier</span></li>
+      <li><span class="bead">yoj-9fe.7</span><span>bd work link</span></li>
+      <li><span class="bead">yoj-9fe.8</span><span><code>status</code>: progress, open changes, staleness, drift</span></li>
+      <li><span class="bead">yoj-9fe.9</span><span>CLI wiring, <code>--json</code>, error codes</span></li>
+      <li><span class="bead">yoj-9fe.10</span><span>Dogfood on <code>anvesa/MEDHA_INSPIRED_EVOLUTION.md</code></span></li>
+    </ul>
+    <p class="note">After v0: HTML review renderer with annotations (filed, labelled post-v0), OpenSpec import/export, git-ref and Dolt sync, medha rule sink, Claude Code plugin.</p>
+  </section>
+</main>

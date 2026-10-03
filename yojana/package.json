@@ -1,0 +1,17 @@
+{
+  "name": "@cntxt-labs/yojana",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Engine facade: ingest, status, archive, check.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@cntxt-labs/yojana-core": "workspace:*",
+    "@cntxt-labs/yojana-store": "workspace:*",
+    "@cntxt-labs/yojana-sync": "workspace:*",
+    "@cntxt-labs/yojana-markdown": "workspace:*"
+  },
+  "license": "MIT"
+}

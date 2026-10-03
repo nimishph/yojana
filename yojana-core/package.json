@@ -1,0 +1,12 @@
+{
+  "name": "@cntxt-labs/yojana-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Domain model and ports: requirements, revisions, changes, claims; StorePort, SyncPort, ParserPort, VerifierPort, WorkLinkPort.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {},
+  "license": "MIT"
+}

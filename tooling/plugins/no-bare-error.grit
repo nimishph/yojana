@@ -1,0 +1,13 @@
+// Throw a YojanaError subclass with a code and hint, never a built-in Error.
+`new $ctor($args)` where {
+  $ctor <: or {
+    `Error`,
+    `TypeError`,
+    `RangeError`,
+    `SyntaxError`,
+    `ReferenceError`,
+    `EvalError`,
+    `URIError`
+  },
+  register_diagnostic(span=$ctor, message="Do not construct built-in errors. Throw a YojanaError subclass carrying a code and hint (see @cntxt-labs/yojana-core).", severity="error")
+}
