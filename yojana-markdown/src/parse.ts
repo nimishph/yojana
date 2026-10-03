@@ -257,14 +257,13 @@ export function parsePlan(source: string, input: string): ParseResult {
       continue;
     }
     seen.set(draft.id, draft.line);
-    const text = normalizeContent(draft.lines.join('\n'));
-    requirements.push({
+    const fields = {
       id: draft.id,
       title: draft.title,
-      text,
-      revision: requirementRevision(draft.id, text, draft.claims),
+      text: normalizeContent(draft.lines.join('\n')),
       claims: draft.claims,
-    });
+    };
+    requirements.push({ ...fields, revision: requirementRevision(fields) });
     parts.push({ kind: 'requirement', id: draft.id });
   }
 

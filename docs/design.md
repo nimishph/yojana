@@ -103,10 +103,22 @@ other only through `src/index.ts`.
 
 ## Keeping files and log in step
 
-`yojana ingest` diffs plan files against the last recorded revision of each requirement and records
-new revisions. A Claude Code PostToolUse hook on edits under `plans/` runs it automatically. If a
-file was edited on top of a stale base, ingest refuses and explains; the file can always be
-regenerated from the log.
+`yojana ingest` records edits to plan files. To tell an edit from a file that has fallen behind, it
+keeps a **base** per plan (`.yojana/base/<plan>.json`, committed with the plans): the revision of
+each requirement the last time the file and the log agreed, much like git's index. Each requirement,
+and the plan's status, is compared three ways:
+
+| file vs base vs log | meaning | ingest does |
+|---|---|---|
+| file = log | in step | nothing |
+| base = log, file differs | the file was edited | records it on top of the log |
+| file = base, log differs | the log moved, the file did not | reports the file as behind |
+| all three differ | both moved | refuses the whole file, records nothing |
+
+A plan is ingested all or nothing, and re-running with no edits appends nothing. If a base is lost
+for a plan the log already knows, differing requirements are refused unless `--trust-file` says to
+record the file on top of the log. A Claude Code PostToolUse hook on edits under `plans/` can run
+ingest automatically. The file can always be regenerated from the log.
 
 ## Review surface
 

@@ -8,7 +8,7 @@ const req = (id: string, text: string): Requirement => ({
   id,
   title: id,
   text,
-  revision: requirementRevision(id, text, []),
+  revision: requirementRevision({ id, title: id, text, claims: [] }),
   claims: [],
 });
 

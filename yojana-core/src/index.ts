@@ -1,3 +1,4 @@
+export type { BasePort, PlanBase } from './base-port.ts';
 export { type BaseConflict, findBaseConflicts } from './conflicts.ts';
 export { InvalidArgumentError, YojanaError } from './errors.ts';
 export type { YojanaEvent, YojanaEventInput } from './events.ts';

@@ -42,21 +42,27 @@ export function normalizeContent(text: string): string {
 const REVISION_HEX_CHARS = 16;
 
 /**
- * The revision of a requirement: its prose and its claims together, since changing what a
- * requirement checks changes the requirement. Every parser computes revisions through this, so the
- * same requirement has the same revision whatever file format it was read from.
+ * The revision of a requirement: everything about it except its id. Title, prose and claims all
+ * count, since renaming a requirement or changing what it checks changes the requirement. Every
+ * parser computes revisions through this, so the same requirement has the same revision whatever
+ * file format it was read from.
  */
-export function requirementRevision(
-  id: RequirementId,
-  text: string,
-  claims: readonly {
+export function requirementRevision(requirement: {
+  readonly id: RequirementId;
+  readonly title: string;
+  readonly text: string;
+  readonly claims: readonly {
     readonly kind: string;
     readonly expression: string;
     readonly expect: boolean;
-  }[],
-): RevisionHash {
+  }[];
+}): RevisionHash {
+  const { id, title, text, claims } = requirement;
   const claimLines = claims.map((c) => `claim ${c.kind} ${c.expect} ${c.expression.trim()}`);
-  return revisionHash(id, [normalizeContent(text), ...claimLines].join('\n'));
+  return revisionHash(
+    id,
+    [`title ${title.trim()}`, normalizeContent(text), ...claimLines].join('\n'),
+  );
 }
 
 export function revisionHash(id: RequirementId, text: string): RevisionHash {
