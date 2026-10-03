@@ -1,6 +1,7 @@
 // Engine facade: composes the ports into ingest, status, archive and check. See docs/design.md.
 export const VERSION = '0.0.0';
 
+export { type ImportReport, importAndValidate } from '@cntxt-labs/yojana-markdown';
 export {
   type AbandonResult,
   type ArchiveResult,

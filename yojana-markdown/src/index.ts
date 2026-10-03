@@ -23,3 +23,9 @@ export class MarkdownParser implements ParserPort {
     return renderPlan(plan);
   }
 }
+export {
+  type ImportOptions,
+  type ImportReport,
+  importAndValidate,
+  importRoadmap,
+} from './import.ts';

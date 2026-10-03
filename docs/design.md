@@ -206,7 +206,14 @@ yojana refresh                            bring log changes into plan files that
 yojana status [plan] [--check]            plans, progress, pending edits, open changes
 yojana check [plan] [--strict]            verify claims against the code
 yojana repair                             recover a corrupt log
+yojana import <file> --id <plan-id>       start a plan from an existing Markdown roadmap
 ```
+
+`import` takes requirements from the heading level where bead ids appear (each heading's ids
+become its `beads=` link; without ids, every `##` section), keeps other sections as prose, drops
+status tables (progress comes from beads), and validates the result before writing it. It never
+ingests: claims still have to be written by a person. Anvesa's 225-line roadmap imported into the
+same 8 requirements and bead links as the hand conversion.
 
 Every command takes `--json`, including for errors. Exit codes: 0 done; 1 refused, violated,
 invalid or failed; 2 usage.

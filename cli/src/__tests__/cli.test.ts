@@ -158,4 +158,23 @@ describe('yojana CLI, start to finish', () => {
     expect((await yojana('status')).code).toBe(0);
     expect((await yojana('repair')).out).toContain('nothing to repair');
   });
+
+  test('import writes a plan from a roadmap, and will not overwrite without --force', async () => {
+    writeFileSync(
+      join(root, 'ROADMAP.md'),
+      '# Roadmap\n\n## First step\n\nDo it.\n\n## Second step\n\nThen this.\n',
+    );
+    const first = await yojana('import', 'ROADMAP.md', '--id', 'plan/roadmap');
+    expect(first.code).toBe(0);
+    expect(first.out).toContain('plans/roadmap.md');
+    expect(first.out).toContain('req-first-step');
+    expect(readFileSync(join(root, 'plans', 'roadmap.md'), 'utf8')).toContain(
+      '## Requirement: First step {#req-first-step}',
+    );
+    expect((await yojana('import', 'ROADMAP.md', '--id', 'plan/roadmap')).out).toContain(
+      'FILE_EXISTS',
+    );
+    expect((await yojana('import', 'ROADMAP.md', '--id', 'plan/roadmap', '--force')).code).toBe(0);
+    expect((await yojana('import', 'ROADMAP.md')).code).toBe(2);
+  });
 });

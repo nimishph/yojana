@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import {
@@ -12,6 +12,7 @@ import {
   ensureGitAttributes,
   type FileReport,
   type IngestReport,
+  importAndValidate,
   ingest,
   loadPlanFiles,
   type OpenChangeResult,
@@ -39,6 +40,8 @@ Usage:
   yojana refresh                            bring log changes into plan files that fell behind
   yojana status [plan] [--check]            plans, progress, pending edits, open changes
   yojana repair                             keep a corrupt log's readable events, move the rest aside
+  yojana import <file> --id <plan-id>       start a plan from an existing Markdown roadmap
+                [--prefix <bead-prefix>] [--out <path>] [--force]
   yojana check [plan] [--strict]            verify plan claims against the code
   yojana --version
 
@@ -75,6 +78,10 @@ interface Flags {
   readonly runCheck: boolean;
   readonly staleDays: number;
   readonly reason: string | undefined;
+  readonly id: string | undefined;
+  readonly prefix: string | undefined;
+  readonly out: string | undefined;
+  readonly force: boolean;
   readonly positional: readonly string[];
 }
 
@@ -90,6 +97,10 @@ function parseFlags(argv: readonly string[]): Flags {
     runCheck: false,
     staleDays: DEFAULT_STALE_DAYS,
     reason: undefined as string | undefined,
+    id: undefined as string | undefined,
+    prefix: undefined as string | undefined,
+    out: undefined as string | undefined,
+    force: false,
     positional: [] as string[],
   };
   for (let i = 0; i < argv.length; i++) {
@@ -103,6 +114,10 @@ function parseFlags(argv: readonly string[]): Flags {
     else if (arg === '--plans') flags.plans = value();
     else if (arg === '--changes') flags.changes = value();
     else if (arg === '--reason') flags.reason = value();
+    else if (arg === '--id') flags.id = value();
+    else if (arg === '--prefix') flags.prefix = value();
+    else if (arg === '--out') flags.out = value();
+    else if (arg === '--force') flags.force = true;
     else if (arg === '--json') flags.json = true;
     else if (arg === '--trust-file') flags.trustFile = true;
     else if (arg === '--all') flags.all = true;
@@ -387,6 +402,64 @@ function runCheck(flags: Flags, write: Write): Promise<number> {
   });
 }
 
+// import
+
+function runImport(flags: Flags, write: Write): number {
+  const [file] = flags.positional;
+  if (file === undefined || flags.id === undefined) {
+    throw new YojanaError('CLI_USAGE', 'usage: yojana import <file> --id <plan-id>');
+  }
+  const from = resolve(flags.root, file);
+  if (!existsSync(from)) throw new YojanaError('FILE_NOT_FOUND', `cannot read ${file}`);
+  const name = flags.id.split('/').at(-1) ?? flags.id;
+  const out = resolve(flags.root, flags.out ?? join(flags.plans ?? 'plans', `${name}.md`));
+  const outSource = toSource(flags.root, out);
+  if (existsSync(out) && !flags.force) {
+    throw new YojanaError('FILE_EXISTS', `${outSource} already exists`, {
+      hint: 'choose another --out, or pass --force to replace it',
+    });
+  }
+  const { report, issues } = importAndValidate(readFileSync(from, 'utf8'), {
+    source: toSource(flags.root, from),
+    planId: flags.id,
+    prefix: flags.prefix,
+  });
+  if (issues.length > 0) {
+    const lines = issues.map(
+      (i) => `  ${i.line === undefined ? '' : `line ${i.line}: `}${i.code} ${i.message}`,
+    );
+    emit(
+      flags,
+      write,
+      { report, issues },
+      `import produced an invalid plan; nothing written\n${lines.join('\n')}\n`,
+    );
+    return 1;
+  }
+  mkdirSync(join(out, '..'), { recursive: true });
+  writeFileSync(out, report.markdown);
+
+  const prefix =
+    report.prefix === undefined
+      ? 'no bead ids found'
+      : `bead prefix ${report.prefix.value}${report.prefix.detected ? ' (detected; --prefix to change)' : ''}`;
+  const lines = [
+    `${outSource}  ${report.title}`,
+    `  ${plural(report.requirements.length, 'requirement')} from level-${report.level} headings · ${plural(report.beads.length, 'bead')} · ${prefix}`,
+    ...report.requirements.map(
+      (r) => `  ${r.id}${r.beads.length > 0 ? `  beads=${r.beads.join(',')}` : ''}`,
+    ),
+  ];
+  if (report.droppedTables > 0) {
+    lines.push(
+      `  dropped ${plural(report.droppedTables, 'status table')}: progress comes from the beads`,
+    );
+  }
+  lines.push('', 'Review it, add claims, then run yojana ingest.');
+  emit(flags, write, { ...report, out: outSource }, `${lines.join('\n')}\n`);
+  return 0;
+}
+
 // repair
 
 function runRepair(flags: Flags, write: Write): Promise<number> {
@@ -592,6 +665,7 @@ export async function run(argv: readonly string[], write: Write): Promise<number
     if (command === 'status') return await runStatus(flags(), write);
     if (command === 'refresh') return await runRefresh(flags(), write);
     if (command === 'repair') return await runRepair(flags(), write);
+    if (command === 'import') return runImport(flags(), write);
   } catch (error) {
     if (error instanceof YojanaError) {
       const { code, message, hint } = error;
