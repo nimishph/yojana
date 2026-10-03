@@ -92,7 +92,7 @@ td code, th code { white-space: nowrap; }
     <div class="eyebrow">cntxt-labs · design · v0 built · 2026-10-03</div>
     <h1>yojana: plans as checkable contracts</h1>
     <p class="lede">Plain Markdown plans backed by an append-only log of every requirement revision. It catches conflicting edits, checks claims against the code, and reads progress from beads.</p>
-    <div class="meta"><span>repo: yojana/</span><span>epic: yoj-9fe (closed)</span><span>184 tests</span><span>source: docs/design.md</span></div>
+    <div class="meta"><span>repo: yojana/</span><span>epic: yoj-9fe (closed)</span><span>191 tests</span><span>source: docs/design.md</span></div>
   </header>
 
   <section id="why">
@@ -163,6 +163,7 @@ expect: false
           <tr><td><code>path</code></td><td>a path or glob</td><td>a file exists</td></tr>
           <tr><td><code>wql</code></td><td><code>&lt;wql&gt; [in &lt;dir&gt;]</code></td><td>anvesa's query matches, only under the folder if given</td></tr>
           <tr><td><code>dependents</code></td><td><code>&lt;path&gt; [from &lt;dir&gt;]</code></td><td>something imports the path, only importers under the folder if given</td></tr>
+          <tr><td><code>text</code></td><td><code>&lt;regex&gt; in &lt;path or glob&gt;</code></td><td>a line in those files matches; no file to search is unverifiable</td></tr>
         </tbody>
       </table>
     </div>
@@ -218,6 +219,7 @@ expect: false
   <section id="status">
     <h2>Status <span class="anchor">#status</span></h2>
     <p><code>yojana status [--check]</code> shows each plan's lifecycle, progress from its beads (an epic counts its children; an unreachable bd is reported, never shown as 0%), edits not yet ingested, requirements behind the log, contested requirements, open changes with age, and claim results.</p>
+    <p>A requirement can name its beads on its heading, <code>{#req-primer beads=anv-35b}</code>. Status then flags <b>close?</b> when every claim holds but a linked bead is open, and <b>reopen?</b> when its beads are closed but a claim is violated. On anvesa's roadmap that produced six close? prompts.</p>
   </section>
 
   <section id="architecture">
@@ -229,7 +231,7 @@ expect: false
           <tr><td>StorePort</td><td>memory, JSONL file</td><td>SQLite</td></tr>
           <tr><td>SyncPort</td><td>noop</td><td>git ref, Dolt, HTTP/S3</td></tr>
           <tr><td>ParserPort</td><td>Markdown plans and changes</td><td>OpenSpec, HTML review</td></tr>
-          <tr><td>VerifierPort</td><td>anvesa (<code>wql</code>, <code>dependents</code>), <code>path</code></td><td><code>text</code>, shell</td></tr>
+          <tr><td>VerifierPort</td><td>anvesa (<code>wql</code>, <code>dependents</code>), <code>path</code>, <code>text</code></td><td>shell</td></tr>
           <tr><td>WorkLinkPort</td><td>bd</td><td>others</td></tr>
           <tr><td>RuleSink</td><td>—</td><td>medha <code>propose</code></td></tr>
         </tbody>
@@ -262,8 +264,6 @@ yojana repair                             recover a corrupt log</code></pre>
   <section id="next">
     <h2>Next <span class="anchor">#next</span></h2>
     <ul class="scope">
-      <li><span class="bead">yoj-nw5</span><span>Link each requirement to its beads, so status flags "claims hold, bead open" and the reverse</span></li>
-      <li><span class="bead">yoj-zuq</span><span><code>text</code> claims: a file contains, or lacks, a pattern</span></li>
       <li><span class="bead">yoj-04r</span><span>Import an existing Markdown roadmap as a plan</span></li>
       <li><span class="bead">yoj-djd</span><span>HTML review page with comments anchored to requirement revisions</span></li>
     </ul>
