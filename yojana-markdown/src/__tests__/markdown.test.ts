@@ -242,3 +242,14 @@ describe('parsePlan: git conflicts', () => {
     expect(parsePlan('p.md', plan(body)).ok).toBe(true);
   });
 });
+
+describe('renderPlan: claim defaults', () => {
+  test('expect is written only when false', () => {
+    const text = plan(
+      '## Requirement: a {#a}\n```yojana:claim\nkind: path\nexpression: x\n```\n```yojana:claim\nkind: path\nexpression: y\nexpect: false\n```\n',
+    );
+    const rendered = renderPlan(ok(parsePlan('p.md', text)));
+    expect(rendered).not.toContain('expect: true');
+    expect(rendered.match(/expect: false/g)).toHaveLength(1);
+  });
+});

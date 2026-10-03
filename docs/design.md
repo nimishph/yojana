@@ -67,7 +67,11 @@ never counts as holding; `--strict` makes it fail the run.
 | `dependents` | `<path> [from <dir>]` | something imports `<path>`, only importers under `<dir>` if given |
 
 A scoped claim's evidence also states how many matched overall, so a check that passes only
-because nothing matches anywhere is visible. Example: `//import[contains(@name, "cli/src")] in
+because nothing matches anywhere is visible.
+
+Prefer claims that name the work over claims that a place exists: `crates/anvesa-napi/Cargo.toml`
+exists before any SIMD code does, while `//function[@name="batch_scan_top_k"] in crates/` holds
+only once it is written. Example: `//import[contains(@name, "cli/src")] in
 core/` with `expect: false` says the core never imports the CLI.
 
 MDX is not an editing format. Agents edit it less reliably and it needs a compiler. It may come back

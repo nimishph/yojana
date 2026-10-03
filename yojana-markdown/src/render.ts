@@ -17,12 +17,13 @@ function yamlString(value: string): string {
   }
 }
 
+/** `expect` is written only when false: true is the default, and authors leave it out. */
 function renderClaim(claim: Claim): string {
   return [
     '```yojana:claim',
     `kind: ${yamlString(claim.kind)}`,
     `expression: ${yamlString(claim.expression)}`,
-    `expect: ${claim.expect}`,
+    ...(claim.expect ? [] : ['expect: false']),
     '```',
   ].join('\n');
 }
