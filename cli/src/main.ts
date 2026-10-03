@@ -183,7 +183,19 @@ function parseFlags(argv: readonly string[]): Flags {
   return flags;
 }
 
+/**
+ * Who a command acts as: YOJANA_ACTOR, else the agent running it (YOJANA_AGENT, which the Claude
+ * Code plugin's `yojana` sets), else the logged-in user.
+ */
 function actor(): string {
+  return process.env.YOJANA_ACTOR ?? process.env.YOJANA_AGENT ?? person();
+}
+
+/**
+ * The person at a review page. An agent may start the server, but what is done on the page is the
+ * person's, so YOJANA_AGENT does not count here.
+ */
+function person(): string {
   return process.env.YOJANA_ACTOR ?? userInfo().username;
 }
 
@@ -580,7 +592,7 @@ async function runServe(flags: Flags, write: Write): Promise<number> {
     plansDir: flags.plans,
     changesDir: flags.changes,
     port: flags.port,
-    actor: actor(),
+    actor: person(),
     runCheck: flags.runCheck,
     verifiers: () => verifiers(flags.root),
     worklink: () => worklink(flags.root),
@@ -615,7 +627,7 @@ function runReview(flags: Flags, write: Write): Promise<number> {
       runCheck: flags.runCheck,
       verifiers: () => verifiers(flags.root),
       worklink: () => worklink(flags.root),
-      you: actor(),
+      you: person(),
       mode: 'read',
     });
     const template = reviewTemplate();

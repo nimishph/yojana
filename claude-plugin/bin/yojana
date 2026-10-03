@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+# yojana for Claude Code: runs the CLI from this checkout. The plugin's bin/ is on the PATH of
+# Claude's Bash tool only, so what runs through here acts as the agent (YOJANA_AGENT); pages served
+# by `review --serve` still record the person at the page. YOJANA_ACTOR overrides both.
+here="$(cd "$(dirname "$0")/../.." && pwd)"
+if [ ! -f "$here/cli/src/main.ts" ]; then
+  echo "yojana: the plugin must run from a yojana checkout; $here has no cli/src/main.ts" >&2
+  exit 2
+fi
+if [ ! -d "$here/node_modules" ]; then
+  echo "yojana: dependencies are missing; run bun install in $here (see its README)" >&2
+  exit 2
+fi
+YOJANA_AGENT="${YOJANA_AGENT:-claude}" exec bun "$here/cli/src/main.ts" "$@"

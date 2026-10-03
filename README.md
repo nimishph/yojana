@@ -18,6 +18,27 @@ It is part of the cntxt-labs set: **bd** for work, **medha** for rules, **anvesa
 > Pre-release. The domain model, ports and conflict check exist; the commands are being built.
 > See [docs/design.md](docs/design.md) and [examples/plans](examples/plans).
 
+## Claude Code plugin
+
+[`claude-plugin/`](claude-plugin) makes yojana available inside Claude Code:
+
+- the `yojana` skill: plan and change file formats, commands, and the rule that Claude proposes
+  (suggested changes, `yojana decide`) while the person decides;
+- `/yojana:plan <what>` drafts a plan with checkable claims; `/yojana:review` opens the live
+  review pages;
+- a `yojana` command on Claude's PATH that records its actions as `claude` (pages served by
+  `review --serve` still record the person);
+- a SessionStart hook that, in a repository with `.yojana/`, tells Claude so and lists open
+  changes and decisions waiting on a person (log only; it never calls bd or anvesa).
+
+It runs the CLI from this checkout, so set up the checkout first (see Develop), then in Claude
+Code:
+
+```
+/plugin marketplace add <path to this repository>
+/plugin install yojana@yojana
+```
+
 ## Develop
 
 The review page is drawn by [patra](../patra) (see [ADR-001](docs/adr-001-patra-split.md)), a

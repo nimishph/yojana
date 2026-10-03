@@ -1,0 +1,13 @@
+{
+  "name": "yojana",
+  "displayName": "yojana",
+  "version": "0.1.0",
+  "description": "Plans as checkable contracts: requirements with claims verified against the code, a revision log, suggested changes, review pages, and decisions on beads that a person finalizes.",
+  "author": {
+    "name": "nimishph",
+    "url": "https://github.com/nimishph"
+  },
+  "repository": "https://github.com/nimishph/yojana",
+  "license": "MIT",
+  "keywords": ["planning", "plans", "requirements", "review", "beads", "anvesa"]
+}
