@@ -21,6 +21,10 @@ import {
  *   F = B, F != L  the log moved and the file did not; the file is behind (reported, not changed)
  *   otherwise      both moved; the whole file is refused, nothing is recorded
  *
+ * One exception: a requirement the log marks contested (two branches edited it and git merged
+ * both edits into the log) is settled by the file, which is where the person resolved git's
+ * conflict. Its version is recorded on top of the log even when it equals the log's.
+ *
  * A plan is ingested all or nothing. Re-running with no edits appends nothing.
  */
 
@@ -46,7 +50,8 @@ export type Movement = 'same' | 'edited' | 'behind' | 'conflict';
 
 export interface RequirementOutcome {
   readonly id: RequirementId;
-  readonly movement: Exclude<Movement, 'same'>;
+  /** 'resolved': the requirement was contested after a merge; the file's version settles it. */
+  readonly movement: Exclude<Movement, 'same'> | 'resolved';
   /** What the edit does to the log; set when movement is 'edited'. */
   readonly action?: 'added' | 'modified' | 'removed' | undefined;
   readonly file: RevisionHash | undefined;
@@ -135,6 +140,7 @@ export async function ingest(options: IngestOptions): Promise<IngestReport> {
     const logStatus = logPlan?.status;
     const baseStatus = missingBase && options.trustFile === true ? logStatus : savedBase?.status;
 
+    const contested = logPlan?.contested ?? new Map();
     const ids = [...new Set([...fileRevs.keys(), ...logRevs.keys(), ...baseRevs.keys()])];
     const outcomes: RequirementOutcome[] = [];
     const nextBase: Record<RequirementId, RevisionHash> = {};
@@ -143,12 +149,14 @@ export async function ingest(options: IngestOptions): Promise<IngestReport> {
       const f = fileRevs.get(id);
       const b = baseRevs.get(id);
       const l = logRevs.get(id);
-      const moved = movement(f, b, l);
+      // Both branches edited it and the merged log holds both: the file is how a person settles
+      // it, so it is recorded on top of the log whatever the base says.
+      const moved: Movement | 'resolved' = contested.has(id) ? 'resolved' : movement(f, b, l);
       const kept = moved === 'behind' ? b : f;
       if (kept !== undefined && moved !== 'conflict') nextBase[id] = kept;
       if (moved === 'same') continue;
       const action =
-        moved !== 'edited'
+        moved !== 'edited' && moved !== 'resolved'
           ? undefined
           : f === undefined
             ? 'removed'
@@ -191,7 +199,7 @@ export async function ingest(options: IngestOptions): Promise<IngestReport> {
     }
     const byId = new Map(plan.requirements.map((r) => [r.id, r]));
     for (const o of outcomes) {
-      if (o.movement !== 'edited') continue;
+      if (o.movement !== 'edited' && o.movement !== 'resolved') continue;
       const requirement = byId.get(o.id);
       if (o.action === 'removed' && o.log !== undefined) {
         events.push({ type: 'requirement-removed', planId: plan.id, id: o.id, base: o.log });

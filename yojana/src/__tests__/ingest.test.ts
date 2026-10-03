@@ -196,3 +196,44 @@ describe('ingest', () => {
     expect(report.files[2]?.issues[0]?.code).toBe('DUPLICATE_PLAN');
   });
 });
+
+describe('ingest after a merge where both branches edited one requirement', () => {
+  test('the plan file settles the contested requirement, even when it matches one side', async () => {
+    const ctx = await setup();
+    await ctx.run(planText({ a: 'one', b: 'two' }));
+    const start = (await ctx.heads()).get('a');
+    // The other branch's edit, merged into the log on top of the same starting revision.
+    const recordOn = async (text: string) => {
+      const parsed = parser.parse('elsewhere', planText({ a: text }));
+      if (!parsed.ok || parsed.plan.requirements[0] === undefined) {
+        throw new YojanaError('TEST_FIXTURE', 'does not parse');
+      }
+      await ctx.store.append(
+        {
+          type: 'revision-recorded',
+          planId: 'plan/p',
+          requirement: parsed.plan.requirements[0],
+          base: start,
+        },
+        'other',
+      );
+    };
+    await recordOn('ours');
+    await recordOn('theirs');
+    expect(
+      foldLog(await ctx.store.events())
+        .plans.get('plan/p')
+        ?.contested.has('a'),
+    ).toBe(true);
+
+    // The person resolved git's conflict in the plan file by keeping "theirs".
+    const report = await ctx.run(planText({ a: 'theirs', b: 'two' }));
+    expect(report.outcome).toBe('recorded');
+    expect(report.requirements).toMatchObject([{ id: 'a', movement: 'resolved' }]);
+    const state = foldLog(await ctx.store.events());
+    expect(state.plans.get('plan/p')?.contested.size).toBe(0);
+
+    const again = await ctx.run(planText({ a: 'theirs', b: 'two' }));
+    expect(again).toMatchObject({ outcome: 'unchanged', requirements: [] });
+  });
+});

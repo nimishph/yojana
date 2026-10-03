@@ -219,3 +219,26 @@ describe('renderPlan: claim values', () => {
     },
   );
 });
+
+describe('parsePlan: git conflicts', () => {
+  test('an unresolved merge conflict is an issue on each marker line', () => {
+    const body = [
+      '## Requirement: a {#a}', // 5
+      '<<<<<<< HEAD', // 6
+      'ours',
+      '=======', // 8
+      'theirs',
+      '>>>>>>> alice', // 10
+    ].join('\n');
+    expect(codes(parsePlan('p.md', plan(body)))).toEqual([
+      'GIT_CONFLICT_MARKER@6',
+      'GIT_CONFLICT_MARKER@8',
+      'GIT_CONFLICT_MARKER@10',
+    ]);
+  });
+
+  test('markers inside a code fence are example text', () => {
+    const body = '## Requirement: a {#a}\n```\n<<<<<<< HEAD\n=======\n>>>>>>> x\n```\n';
+    expect(parsePlan('p.md', plan(body)).ok).toBe(true);
+  });
+});

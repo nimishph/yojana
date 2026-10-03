@@ -13,7 +13,13 @@ const req = (id: string, text: string): Requirement => ({
 });
 
 function log(...inputs: YojanaEventInput[]): YojanaEvent[] {
-  return inputs.map((input, i) => ({ ...input, seq: i + 1, at: 1000 + i, actor: 'tester' }));
+  return inputs.map((input, i) => ({
+    ...input,
+    eventId: `e_${i + 1}`,
+    seq: i + 1,
+    at: 1000 + i,
+    actor: 'tester',
+  }));
 }
 
 const a1 = req('a', 'one');
@@ -128,6 +134,7 @@ describe('foldLog', () => {
           planId: 'p',
           requirement: a2,
           base: a1.revision,
+          eventId: 'e_3',
           seq: 3,
           at: 0,
           actor: 't',
@@ -152,6 +159,7 @@ describe('foldLog', () => {
         planId: 'p',
         to: 'accepted',
         reason: 'r',
+        eventId: 'e_x',
         seq: 1,
         at: 0,
         actor: 't',
@@ -252,4 +260,57 @@ describe('foldLog: properties over random logs', () => {
       expect(foldLog(viaJsonl)).toEqual(once);
     },
   );
+});
+
+describe('foldLog: concurrent edits after a merge', () => {
+  const b2 = req('b', 'bee two');
+
+  test('two edits written against the same revision leave the requirement contested', () => {
+    // Both branches started from a1 and edited a; git kept both lines.
+    const state = foldLog(
+      log(
+        { type: 'revision-recorded', planId: 'p', requirement: a1 },
+        { type: 'revision-recorded', planId: 'p', requirement: a2, base: a1.revision },
+        {
+          type: 'revision-recorded',
+          planId: 'p',
+          requirement: req('a', 'three'),
+          base: a1.revision,
+        },
+      ),
+    );
+    expect(state.plans.get('p')?.contested.get('a')).toEqual([
+      a2.revision,
+      req('a', 'three').revision,
+    ]);
+    expect(state.anomalies.map((x) => x.code)).toEqual(['STALE_BASE']);
+  });
+
+  test('an edit written against the head settles it', () => {
+    const three = req('a', 'three');
+    const settled = req('a', 'settled');
+    const state = foldLog(
+      log(
+        { type: 'revision-recorded', planId: 'p', requirement: a1 },
+        { type: 'revision-recorded', planId: 'p', requirement: a2, base: a1.revision },
+        { type: 'revision-recorded', planId: 'p', requirement: three, base: a1.revision },
+        { type: 'revision-recorded', planId: 'p', requirement: settled, base: three.revision },
+      ),
+    );
+    expect(state.plans.get('p')?.contested.size).toBe(0);
+    expect(planHeads(state, 'p').get('a')).toBe(settled.revision);
+  });
+
+  test('edits to different requirements on two branches merge with no anomaly', () => {
+    const state = foldLog(
+      log(
+        { type: 'revision-recorded', planId: 'p', requirement: a1 },
+        { type: 'revision-recorded', planId: 'p', requirement: b1 },
+        { type: 'revision-recorded', planId: 'p', requirement: a2, base: a1.revision },
+        { type: 'revision-recorded', planId: 'p', requirement: b2, base: b1.revision },
+      ),
+    );
+    expect(state.anomalies).toEqual([]);
+    expect(state.plans.get('p')?.contested.size).toBe(0);
+  });
 });

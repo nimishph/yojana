@@ -120,6 +120,22 @@ for a plan the log already knows, differing requirements are refused unless `--t
 record the file on top of the log. A Claude Code PostToolUse hook on edits under `plans/` can run
 ingest automatically. The file can always be regenerated from the log.
 
+## Branches and merges
+
+The log and the bases are committed with the plans, so two branches can each record edits. Both
+files hold one fact per line, and yojana writes `.yojana/.gitattributes` so git merges them by
+keeping both sides' lines (`merge=union`):
+
+- **Log.** Each event carries a content id (`eventId`) and no stored position; order is line order.
+  A merged log reads as one log. A repeated event id, or a line that is not an event, is corruption.
+- **Bases.** A header line, then one line per requirement; when a line repeats after a merge, the
+  last one wins.
+- **Different requirements edited on two branches** merge with no manual step and no anomaly.
+- **The same requirement edited on both** leaves it *contested* in the fold: two edits written
+  against the same revision. The plan file has an ordinary git conflict there. Ingest refuses a
+  file that still has conflict markers; once a person resolves it, ingest records the file's
+  version on top of the log (`resolved`), which settles the contest.
+
 ## Review surface
 
 The HTML renderer turns a plan into a review page: requirements, claim results, linked bead status,

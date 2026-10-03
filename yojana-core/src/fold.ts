@@ -26,6 +26,13 @@ export interface PlanState {
   readonly statusHistory: StatusEntry[];
   /** Current revision of every live requirement, in the order they first appeared. */
   readonly heads: Map<RequirementId, Requirement>;
+  /**
+   * Requirements edited concurrently: an edit arrived written against a revision that was no
+   * longer current (two git branches both edited it, then merged). Maps the id to the competing
+   * revisions, in log order; the head is the last one. Cleared by the next edit written against
+   * the head, which is how a person settles it.
+   */
+  readonly contested: Map<RequirementId, (RevisionHash | undefined)[]>;
   readonly annotations: Annotation[];
 }
 
@@ -61,7 +68,14 @@ export function emptyFoldState(): FoldState {
 function planFor(state: FoldState, id: string): PlanState {
   let plan = state.plans.get(id);
   if (plan === undefined) {
-    plan = { id, status: 'draft', statusHistory: [], heads: new Map(), annotations: [] };
+    plan = {
+      id,
+      status: 'draft',
+      statusHistory: [],
+      heads: new Map(),
+      contested: new Map(),
+      annotations: [],
+    };
     state.plans.set(id, plan);
   }
   return plan;
@@ -71,6 +85,13 @@ function applyDelta(state: FoldState, plan: PlanState, delta: Delta, seq: number
   const id = delta.op === 'remove' ? delta.id : delta.requirement.id;
   const actual = plan.heads.get(id)?.revision;
   const stale = delta.op === 'add' ? actual !== undefined : actual !== delta.base;
+  const after = delta.op === 'remove' ? undefined : delta.requirement.revision;
+  if (stale) {
+    const competing = plan.contested.get(id) ?? [actual];
+    plan.contested.set(id, [...competing, after]);
+  } else {
+    plan.contested.delete(id);
+  }
   if (stale) {
     state.anomalies.push({
       seq,

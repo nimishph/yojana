@@ -23,4 +23,10 @@ export {
   type RequirementOutcome,
   type StatusOutcome,
 } from './ingest.ts';
-export { loadPlanFiles, openWorkspace, settleChangeFile, type Workspace } from './workspace.ts';
+export {
+  ensureGitAttributes,
+  loadPlanFiles,
+  openWorkspace,
+  settleChangeFile,
+  type Workspace,
+} from './workspace.ts';

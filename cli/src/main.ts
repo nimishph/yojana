@@ -7,6 +7,7 @@ import {
   abandonChange,
   archiveChange,
   type ChangeProblem,
+  ensureGitAttributes,
   type FileReport,
   type IngestReport,
   ingest,
@@ -99,6 +100,7 @@ async function withWorkspace(
 ): Promise<number> {
   const workspace = openWorkspace(flags.root, { plansDir: flags.plans, changesDir: flags.changes });
   const opened = await workspace.store.open();
+  ensureGitAttributes(flags.root);
   if (opened.status === 'corrupt') {
     write(`${opened.source} is unreadable from event ${opened.atSeq}; nothing was done\n`);
     return 1;

@@ -1,4 +1,10 @@
-import type { OpenResult, StorePort, YojanaEvent, YojanaEventInput } from '@cntxt-labs/yojana-core';
+import {
+  computeEventId,
+  type OpenResult,
+  type StorePort,
+  type YojanaEvent,
+  type YojanaEventInput,
+} from '@cntxt-labs/yojana-core';
 import { StoreClosedError } from './errors.ts';
 
 /** In-memory log: the reference backend. Survives close/open on the same instance. */
@@ -23,7 +29,14 @@ export class MemoryStore implements StorePort {
 
   async append(event: YojanaEventInput, actor: string): Promise<YojanaEvent> {
     if (!this.#opened) throw new StoreClosedError(this.name);
-    const stored: YojanaEvent = { ...event, seq: this.#log.length + 1, at: this.#now(), actor };
+    const at = this.#now();
+    const stored: YojanaEvent = {
+      ...event,
+      eventId: computeEventId(event, at, actor),
+      seq: this.#log.length + 1,
+      at,
+      actor,
+    };
     this.#log.push(stored);
     return stored;
   }

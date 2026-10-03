@@ -9,7 +9,13 @@ import {
   writeSync,
 } from 'node:fs';
 import { dirname } from 'node:path';
-import type { OpenResult, StorePort, YojanaEvent, YojanaEventInput } from '@cntxt-labs/yojana-core';
+import {
+  computeEventId,
+  type OpenResult,
+  type StorePort,
+  type YojanaEvent,
+  type YojanaEventInput,
+} from '@cntxt-labs/yojana-core';
 import { CorruptStoreError, StoreClosedError } from './errors.ts';
 
 /**
@@ -17,9 +23,11 @@ import { CorruptStoreError, StoreClosedError } from './errors.ts';
  *
  *   - **Append-only.** A write adds one line and fsyncs it, so a git diff of the log reads as the
  *     list of what happened, and nothing earlier is ever rewritten by normal use.
- *   - **Checked on open.** Every line must be a JSON event whose seq is exactly one more than the
- *     previous. The first line that is not (garbage, a torn final write, a gap) marks the log
- *     corrupt from that seq: reads keep serving the good prefix, appends refuse.
+ *   - **Merge-friendly.** Lines carry an event id but no position. Order is the order of lines, so
+ *     a log that git merged line by line (merge=union) from two branches reads as one log.
+ *   - **Checked on open.** Every line must be a JSON event, and no id may appear twice. The first
+ *     line that fails (garbage, a torn final write, a repeated event) marks the log corrupt from
+ *     that position: reads keep serving the good prefix, appends refuse.
  *   - **Never silently reset.** `repair()` rewrites the good prefix and moves the unreadable tail
  *     to a side file, so the bytes are still there to inspect.
  *
@@ -38,15 +46,31 @@ export interface RepairResult {
   readonly quarantined: string | undefined;
 }
 
-function isEvent(value: unknown, expectedSeq: number): value is YojanaEvent {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const v = value as Record<string, unknown>;
-  return (
-    v.seq === expectedSeq &&
-    typeof v.type === 'string' &&
-    typeof v.at === 'number' &&
-    typeof v.actor === 'string'
-  );
+/**
+ * Decode one stored line. Lines written before event ids existed carry a `seq` and no `eventId`; their
+ * id is computed from their content, and the stored seq is ignored like any stored position.
+ */
+function decodeLine(line: string, seq: number): YojanaEvent | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const { eventId, seq: _storedSeq, at, actor, ...input } = value as Record<string, unknown>;
+  if (typeof input.type !== 'string' || typeof at !== 'number' || typeof actor !== 'string') {
+    return undefined;
+  }
+  const event = input as unknown as YojanaEventInput;
+  const id = typeof eventId === 'string' ? eventId : computeEventId(event, at, actor);
+  return { ...event, eventId: id, seq, at, actor };
+}
+
+/** What a line stores: everything but the position, which is derived on read. */
+function encodeLine(event: YojanaEvent): string {
+  const { seq: _position, ...stored } = event;
+  return `${JSON.stringify(stored)}\n`;
 }
 
 export class FileStore implements StorePort {
@@ -70,20 +94,17 @@ export class FileStore implements StorePort {
     if (!existsSync(this.path)) return { status: 'ok' };
 
     const lines = readFileSync(this.path, 'utf8').split('\n');
+    const ids = new Set<string>();
     for (const [index, line] of lines.entries()) {
       if (line.trim() === '') continue;
-      const expected = this.#log.length + 1;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        parsed = undefined;
-      }
-      if (!isEvent(parsed, expected)) {
+      const position = this.#log.length + 1;
+      const event = decodeLine(line, position);
+      if (event === undefined || ids.has(event.eventId)) {
         this.#badTail = lines.slice(index).join('\n');
-        return { status: 'corrupt', source: this.path, atSeq: expected };
+        return { status: 'corrupt', source: this.path, atSeq: position };
       }
-      this.#log.push(parsed);
+      ids.add(event.eventId);
+      this.#log.push(event);
     }
     return { status: 'ok' };
   }
@@ -97,11 +118,18 @@ export class FileStore implements StorePort {
     if (this.#badTail !== undefined) {
       throw new CorruptStoreError(this.path, this.#log.length + 1);
     }
-    const stored: YojanaEvent = { ...event, seq: this.#log.length + 1, at: this.#now(), actor };
+    const at = this.#now();
+    const stored: YojanaEvent = {
+      ...event,
+      eventId: computeEventId(event, at, actor),
+      seq: this.#log.length + 1,
+      at,
+      actor,
+    };
     mkdirSync(dirname(this.path), { recursive: true });
     const fd = openSync(this.path, 'a');
     try {
-      writeSync(fd, `${JSON.stringify(stored)}\n`);
+      writeSync(fd, encodeLine(stored));
       fsyncSync(fd);
     } finally {
       closeSync(fd);
@@ -132,7 +160,7 @@ export class FileStore implements StorePort {
     const quarantined = `${this.path}.corrupt-${this.#now()}`;
     writeDurably(quarantined, this.#badTail);
     const temp = `${this.path}.tmp`;
-    writeDurably(temp, this.#log.map((e) => `${JSON.stringify(e)}\n`).join(''));
+    writeDurably(temp, this.#log.map(encodeLine).join(''));
     renameSync(temp, this.path);
     this.#badTail = undefined;
     return { kept: this.#log.length, quarantined };

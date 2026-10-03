@@ -30,6 +30,8 @@ const LEVEL2_HEADING = /^##\s/;
 const TITLE_HEADING = /^#\s+(.*?)\s*#*\s*$/;
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})\s*([^\s`]*)/;
 const FRONTMATTER_FENCE = '---';
+/** git's conflict markers; inside a code fence they are example text and left alone. */
+const GIT_CONFLICT_MARKER = /^(<{7} |={7}$|>{7} )/;
 
 export type DocumentPart =
   | { readonly kind: 'prose'; readonly markdown: string }
@@ -164,6 +166,14 @@ export function parseDocument(input: string, issue: IssueSink): ParsedDocument |
         pushLine(line);
       }
       continue;
+    }
+
+    if (GIT_CONFLICT_MARKER.test(line)) {
+      issue(
+        lineNo,
+        'GIT_CONFLICT_MARKER',
+        'this file still has a git merge conflict; resolve it before yojana reads it',
+      );
     }
 
     const open = FENCE_OPEN.exec(line);

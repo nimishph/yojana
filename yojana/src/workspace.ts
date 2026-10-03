@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, join, relative, sep } from 'node:path';
 import type { BasePort, ParserPort, StorePort } from '@cntxt-labs/yojana-core';
 import { MarkdownParser } from '@cntxt-labs/yojana-markdown';
@@ -75,4 +83,18 @@ export function settleChangeFile(
   const to = join(dir, `${date.toISOString().slice(0, 'yyyy-mm-dd'.length)}-${basename(from)}`);
   renameSync(from, to);
   return relative(root, to).split(sep).join('/');
+}
+
+const GIT_ATTRIBUTES = `# Written by yojana. The log and the bases hold one fact per line, so git can merge two branches
+# by keeping both sides' lines; yojana reads the result and reports any requirement both edited.
+log.jsonl merge=union
+base/*.jsonl merge=union
+`;
+
+/** Make sure `.yojana/.gitattributes` turns on union merges for the log and the bases. */
+export function ensureGitAttributes(root: string): void {
+  const path = join(root, '.yojana', '.gitattributes');
+  if (existsSync(path)) return;
+  mkdirSync(join(root, '.yojana'), { recursive: true });
+  writeFileSync(path, GIT_ATTRIBUTES);
 }
