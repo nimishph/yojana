@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { findBaseConflicts } from '../conflicts.ts';
+import { computeEventId, type YojanaEventInput } from '../events.ts';
 import type { Requirement } from '../model.ts';
 import { assertRequirementId, revisionHash } from '../revision.ts';
 
@@ -9,6 +11,26 @@ const req = (id: string, text: string): Requirement => ({
   text,
   revision: revisionHash(id, text),
   claims: [],
+});
+
+describe('computeEventId', () => {
+  const event: YojanaEventInput = {
+    type: 'status-changed',
+    planId: 'p',
+    to: 'accepted',
+    reason: 'r',
+  };
+
+  test('without a write position, the id of a line stored before ids is unchanged', () => {
+    const legacy = createHash('sha256')
+      .update(JSON.stringify({ event, at: 5, actor: 'old' }))
+      .digest('hex');
+    expect(`e_${legacy}`).toStartWith(computeEventId(event, 5, 'old'));
+  });
+
+  test('the write position keeps apart one event written twice in a millisecond', () => {
+    expect(computeEventId(event, 5, 'a', 1)).not.toBe(computeEventId(event, 5, 'a', 2));
+  });
 });
 
 describe('revisionHash', () => {

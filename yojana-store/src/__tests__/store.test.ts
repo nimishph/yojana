@@ -98,6 +98,18 @@ describe('FileStore: corruption', () => {
     ]);
   });
 
+  test('the same event by the same actor in one millisecond is two events, not a duplicate', async () => {
+    const path = freshPath();
+    const writer = new FileStore({ path, now: () => 1234 });
+    await writer.open();
+    const first = await writer.append(event, 'a');
+    const second = await writer.append(event, 'a');
+    expect(second.eventId).not.toBe(first.eventId);
+    const store = new FileStore({ path });
+    expect(await store.open()).toEqual({ status: 'ok' });
+    expect(await store.head()).toBe(2);
+  });
+
   test('a torn final write is reported with its seq; the good prefix stays readable', async () => {
     const path = await logWith(2);
     appendFileSync(path, '{"seq":3,"type":"status-ch');

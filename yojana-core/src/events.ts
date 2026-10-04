@@ -76,8 +76,20 @@ export type YojanaEvent = YojanaEventInput & {
 /** Format width of an event id: 64 bits of sha256, ample for one repository's history. */
 const EVENT_ID_HEX_CHARS = 16;
 
-/** The id of an event: a hash of its content, its time and who wrote it. */
-export function computeEventId(event: YojanaEventInput, at: number, actor: string): string {
-  const digest = createHash('sha256').update(JSON.stringify({ event, at, actor })).digest('hex');
+/**
+ * The id of an event: a hash of its content, its time, who wrote it and, for an event being
+ * written, the position it is written at. The position keeps apart the same event written twice by
+ * the same actor within one millisecond; it is hashed once and stored, never recomputed from where
+ * the event sits later. Without it, the id is the one computed for a line stored before ids were.
+ */
+export function computeEventId(
+  event: YojanaEventInput,
+  at: number,
+  actor: string,
+  writtenAt?: number,
+): string {
+  const digest = createHash('sha256')
+    .update(JSON.stringify({ event, at, actor, writtenAt }))
+    .digest('hex');
   return `e_${digest.slice(0, EVENT_ID_HEX_CHARS)}`;
 }

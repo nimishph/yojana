@@ -119,10 +119,11 @@ export class FileStore implements StorePort {
       throw new CorruptStoreError(this.path, this.#log.length + 1);
     }
     const at = this.#now();
+    const seq = this.#log.length + 1;
     const stored: YojanaEvent = {
       ...event,
-      eventId: computeEventId(event, at, actor),
-      seq: this.#log.length + 1,
+      eventId: computeEventId(event, at, actor, seq),
+      seq,
       at,
       actor,
     };
