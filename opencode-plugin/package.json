@@ -1,0 +1,9 @@
+{
+  "name": "@cntxt-labs/yojana-opencode",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "yojana, plans as checkable contracts, as an opencode plugin.",
+  "main": "src/index.ts",
+  "license": "MIT"
+}

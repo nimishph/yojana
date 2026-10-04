@@ -11,8 +11,8 @@ imports the CLI). Every edit is kept in an append-only log (`.yojana/log.jsonl`)
 a history, its comments stay pinned to the text they were about, and its claims say whether the
 plan still matches the code.
 
-`yojana` is on your PATH through this plugin. It acts as you, the agent (`claude`), so the log
-shows what you did and what the person did.
+`yojana` is on your PATH through this plugin. It acts as you, the agent (`claude` in Claude Code,
+`opencode` in opencode), so the log shows what you did and what the person did.
 
 ## The working rule: you propose, the person decides
 
@@ -84,7 +84,7 @@ expect: false
 | decisions waiting, and their outcomes | `yojana decisions [--all]` |
 | bring log edits back into plan files | `yojana refresh` |
 | start a plan from an existing roadmap | `yojana import <file> --id plan/<name>` |
-| review page in the browser | the `/yojana:review` skill |
+| review page in the browser | `/yojana:review` (Claude Code) or `/yojana-review` (opencode) |
 | settings in effect, and where the config file is | `yojana config` |
 
 Add `--json` for machine-readable output. Exit code 1 means refused, violated or failed; the

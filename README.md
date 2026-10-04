@@ -95,6 +95,35 @@ Every setting is optional, and so is the file:
 - **Outside Claude Code:** set `YOJANA_CONFIG` to any file. For a single run, `YOJANA_THEME_CSS`
   names a stylesheet placed before the theme, such as one with font `@import` lines.
 
+## opencode plugin
+
+[`opencode-plugin/`](opencode-plugin) gives opencode the same parts, shared with the Claude Code
+plugin rather than copied:
+- the `yojana` skill;
+- `/yojana-plan <what>` and `/yojana-review`;
+- `yojana` in opencode's shell, recording its actions as `opencode`;
+- at the start of a session in a repository with `.yojana/`, the same note on open changes and
+  pending decisions.
+
+opencode runs a plugin from a path, so it runs in place from this checkout and needs no
+`YOJANA_HOME`. Set up the checkout (see Develop), then add it to `opencode.json` (yours in
+`~/.config/opencode/`, or a project's):
+
+```json
+{
+  "plugin": [["/path/to/yojana/opencode-plugin", { "config": "~/.config/opencode/yojana.config.json" }]]
+}
+```
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `config` | `~/.config/opencode/yojana.config.json` | the `yojana.config.json` to use (see Customize; its `home` is not needed here) |
+| `agent` | `opencode` | the name the log records for what the agent does |
+
+An environment variable that is already set (`YOJANA_CONFIG`, `YOJANA_HOME`, `YOJANA_AGENT`) wins
+over the option. The session note uses opencode's `experimental.chat.system.transform` hook, which
+may change between opencode versions.
+
 ## Develop
 
 The review page is drawn by [patra](../patra) (see [ADR-001](docs/adr-001-patra-split.md)), a
