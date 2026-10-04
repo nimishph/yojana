@@ -19,7 +19,9 @@ disable-model-invocation: true
 
    It prints one URL per plan. Give the person those URLs, using `localhost` in place of
    `127.0.0.1` if their browser needs it. The server listens on this machine only, and every
-   write needs the token the page carries.
+   write needs the token the page carries. Tell them: select text in a requirement to comment on
+   it (a toolbar offers Comment, or press `c`; Ctrl+Enter sends), and `?` lists the keys. The
+   files `yojana review` writes without `--serve` are read-only saved copies.
 4. What the person does on the page is recorded as them, not as you. Their edits rewrite the
    plan files, accepted changes move to `changes/archive/`, and a decision on a bead is finalized
    and applied through bd at once. They can approve requirements one by one, and accept (or

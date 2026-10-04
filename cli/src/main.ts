@@ -57,7 +57,7 @@ Usage:
   yojana status [plan] [--check]            plans, progress, pending edits, open changes
   yojana repair                             keep a corrupt log's readable events, move the rest aside
   yojana comment <plan> <req> "<text>"      note on a requirement [--quote "<span>"] [--reply <id>]
-  yojana review [plan] [--check] [--out f]  write an HTML review page (.yojana/review/<plan>.html)
+  yojana review [plan] [--check] [--out f]  write a read-only copy of the page (.yojana/review/)
   yojana review --serve [--port n]          the review page, live: comment, edit, suggest, accept
   yojana decide <plan> <req> <item> close|reopen --reason <text> [--final]
                                             propose a decision on a work item (--final: decide it)
@@ -811,7 +811,13 @@ function runReview(flags: Flags, write: Write): Promise<number> {
       writeFileSync(out, page.html);
       written.push(toSource(flags.root, out));
     }
-    emit(flags, write, { written }, `${written.map((w) => `wrote ${w}`).join('\n')}\n`);
+    emit(
+      flags,
+      write,
+      { written },
+      `${written.map((w) => `wrote ${w}`).join('\n')}\n` +
+        'a saved copy, read only: to comment, approve or decide, run yojana review --serve\n',
+    );
     return 0;
   });
 }
