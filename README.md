@@ -37,8 +37,8 @@ It runs the CLI from a checkout, so set up the checkout first (see Develop), the
 Code:
 
 ```
-/plugin marketplace add <path to this repository>
-/plugin install yojana@yojana
+/plugin marketplace add nimishph/cntxt-labs
+/plugin install yojana@cntxt-labs
 ```
 
 An installed plugin is a copy of `claude-plugin/` alone, so it needs to know where the checkout
