@@ -52,10 +52,13 @@ Without `YOJANA_HOME`, `yojana` works only when the plugin runs in place:
 ## Develop
 
 The review page is drawn by [patra](../patra) (see [ADR-001](docs/adr-001-patra-split.md)), a
-sibling repository linked rather than published. Register its packages once:
+sibling repository that is not published. Its packages are vendored as tarballs in
+[`vendor/patra/`](vendor/patra), packed from the patra commit named in `vendor/patra/COMMIT`, so
+`bun install` needs no patra checkout. To take a newer patra, commit it there, then:
 
 ```sh
-(cd ../patra && bun install && for p in patra-core patra-serve templates themes; do (cd $p && bun link); done)
+sh tooling/vendor-patra.sh   # packs ../patra (or the path given) into vendor/patra/
+bun install
 ```
 
 ```sh

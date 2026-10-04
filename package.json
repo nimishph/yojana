@@ -13,6 +13,9 @@
     "yojana",
     "cli"
   ],
+  "overrides": {
+    "@cntxt-labs/patra-core": "file:./vendor/patra/cntxt-labs-patra-core-0.0.0.tgz"
+  },
   "engines": {
     "bun": ">=1.3.0"
   },

@@ -12,10 +12,10 @@
     "@cntxt-labs/yojana-core": "workspace:*",
     "@cntxt-labs/yojana-verify": "workspace:*",
     "@cntxt-labs/yojana-work": "workspace:*",
-    "@cntxt-labs/patra-core": "link:@cntxt-labs/patra-core",
-    "@cntxt-labs/patra-serve": "link:@cntxt-labs/patra-serve",
-    "@cntxt-labs/patra-templates": "link:@cntxt-labs/patra-templates",
-    "@cntxt-labs/patra-themes": "link:@cntxt-labs/patra-themes"
+    "@cntxt-labs/patra-core": "file:../vendor/patra/cntxt-labs-patra-core-0.0.0.tgz",
+    "@cntxt-labs/patra-serve": "file:../vendor/patra/cntxt-labs-patra-serve-0.0.0.tgz",
+    "@cntxt-labs/patra-templates": "file:../vendor/patra/cntxt-labs-patra-templates-0.0.0.tgz",
+    "@cntxt-labs/patra-themes": "file:../vendor/patra/cntxt-labs-patra-themes-0.0.0.tgz"
   },
   "license": "MIT"
 }
