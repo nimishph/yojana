@@ -36,6 +36,7 @@ import {
 import { foldLog, type VerifierPort, YojanaError } from '@cntxt-labs/yojana-core';
 import { AnvesaVerifier, PathVerifier, spawnAnvesa, TextVerifier } from '@cntxt-labs/yojana-verify';
 import { BdWorkLink, spawnBd } from '@cntxt-labs/yojana-work';
+import { loadConfig, themeStylesheet } from './config.ts';
 import { reviewTemplate, startReviewServer } from './serve.ts';
 
 const USAGE = `yojana ${VERSION}: plans as checkable contracts
@@ -60,6 +61,7 @@ Usage:
   yojana import <file> --id <plan-id>       start a plan from an existing Markdown roadmap
                 [--prefix <bead-prefix>] [--out <path>] [--force]
   yojana check [plan] [--strict]            verify plan claims against the code
+  yojana config                             the settings in effect from YOJANA_CONFIG
   yojana --version
 
 Options:
@@ -74,6 +76,9 @@ Options:
 Exit codes: 0 done; 1 refused, violated, invalid or failed (the output says which); 2 usage error.
 Errors carry a code (STORE_CORRUPT, CLI_USAGE, ...) and usually a hint; with --json they are
 printed as {"error": {"code", "message", "hint"}}.
+
+YOJANA_CONFIG names a yojana.config.json (paths, fonts, theme tokens, a theme file) that review
+pages use; the Claude Code plugin keeps one in its data folder.
 
 Claims run through anvesa (wql, dependents) and progress through bd; set ANVESA_BIN or BD_BIN if
 they are not on PATH.
@@ -631,7 +636,7 @@ function runReview(flags: Flags, write: Write): Promise<number> {
       mode: 'read',
     });
     const template = reviewTemplate();
-    const head = pageHead(template, readFileSync(themeFile('default'), 'utf8'), []);
+    const head = pageHead(template, themeStylesheet(loadConfig(), themeFile('default')), []);
     const written: string[] = [];
     for (const planId of planIds) {
       const content = await session.load(REVIEW_TEMPLATE, planId);
@@ -660,6 +665,44 @@ function runReview(flags: Flags, write: Write): Promise<number> {
 }
 
 // import
+
+function runConfig(flags: Flags, write: Write): number {
+  const config = loadConfig();
+  if (flags.json) {
+    write(`${JSON.stringify(config, null, 2)}\n`);
+    return 0;
+  }
+  if (config.path === undefined) {
+    write('no config: YOJANA_CONFIG is not set (the Claude Code plugin sets it)\n');
+    return 0;
+  }
+  if (!config.found) {
+    write(`no config at ${config.path}; create it to change paths, fonts or theme tokens\n`);
+    return 0;
+  }
+  const { theme } = config;
+  const count = (values: object) => Object.keys(values).length;
+  write(
+    [
+      `config ${config.path}`,
+      `  home   ${config.home ?? '(not set)'}`,
+      `  vars   ${
+        Object.entries(config.vars)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(', ') || '(none)'
+      }`,
+      `  theme  ${theme.css ?? "patra's default"}`,
+      `  fonts  ${
+        Object.entries(theme.fonts)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join('; ') || '(theme default)'
+      }`,
+      `  tokens ${count(theme.tokens)} light, ${count(theme.dark)} dark`,
+      '',
+    ].join('\n'),
+  );
+  return 0;
+}
 
 function runImport(flags: Flags, write: Write): number {
   const [file] = flags.positional;
@@ -927,6 +970,7 @@ export async function run(argv: readonly string[], write: Write): Promise<number
     if (command === 'decide') return await runDecide(flags(), write);
     if (command === 'decisions') return await runDecisions(flags(), write);
     if (command === 'review') return await runReview(flags(), write);
+    if (command === 'config') return runConfig(flags(), write);
   } catch (error) {
     if (error instanceof YojanaError) {
       const { code, message, hint } = error;

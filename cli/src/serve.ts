@@ -1,10 +1,10 @@
-import { readFileSync } from 'node:fs';
 import { type LoadedTemplate, loadTemplate } from '@cntxt-labs/patra-core';
 import { type PatraServer, serve } from '@cntxt-labs/patra-serve';
 import { templateDir } from '@cntxt-labs/patra-templates';
 import { themeFile } from '@cntxt-labs/patra-themes';
 import { REVIEW_TEMPLATE, reviewSession } from '@cntxt-labs/yojana';
 import { type VerifierPort, type WorkLinkPort, YojanaError } from '@cntxt-labs/yojana-core';
+import { loadConfig, themeStylesheet } from './config.ts';
 
 /**
  * `yojana review --serve`: plans, live, on this machine only. yojana keeps the domain and patra
@@ -57,7 +57,7 @@ export function startReviewServer(options: ServeOptions): ReviewServer {
   });
   const server: PatraServer = serve({
     templates: [reviewTemplate()],
-    themeCss: readFileSync(themeFile('default'), 'utf8'),
+    themeCss: themeStylesheet(loadConfig(), themeFile('default')),
     source: { load: (template, document) => session.load(template, document) },
     handle: (intent) => session.handle(intent),
     actor: options.actor,

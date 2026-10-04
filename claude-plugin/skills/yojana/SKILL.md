@@ -85,6 +85,7 @@ expect: false
 | bring log edits back into plan files | `yojana refresh` |
 | start a plan from an existing roadmap | `yojana import <file> --id plan/<name>` |
 | review page in the browser | the `/yojana:review` skill |
+| settings in effect, and where the config file is | `yojana config` |
 
 Add `--json` for machine-readable output. Exit code 1 means refused, violated or failed; the
 output says which.
@@ -117,6 +118,37 @@ Done in anv-12.3; nothing left to check.
 A MODIFIED or ADDED section is the requirement as it should read afterwards, claims included.
 `yojana change open` pins it to the current text, so if the plan moves first, accepting it is
 refused rather than overwriting someone's edit.
+
+## Settings: yojana.config.json
+
+The person can customize yojana for this installation in `yojana.config.json`. The file lives at
+`$YOJANA_CONFIG`, in the plugin's data folder, which plugin updates keep. When they ask to change
+the review page's look or where yojana runs from, edit that file for them (create it if missing),
+then run `yojana config` to confirm it reads. Every key is optional:
+
+```json
+{
+  "vars": { "sutras": "~/code/sutras" },
+  "home": "${sutras}/yojana",
+  "theme": {
+    "css": "./my-theme.css",
+    "fonts": { "reading": "Charter, Georgia, serif", "ui": "Inter, sans-serif", "mono": "JetBrains Mono, monospace" },
+    "tokens": { "intent-primary": "#5b3cc4", "radius-md": "6px" },
+    "dark": { "intent-primary": "#b7a6f5" }
+  }
+}
+```
+
+- `vars` are path variables. Every path (`home`, `theme.css`, later vars) takes `${name}` from
+  them, then from the environment, a leading `~`, and is relative to the config file.
+- `home` is the yojana checkout. `YOJANA_HOME`, if set, wins; a change applies next session.
+- `theme.css` replaces patra's default theme. `fonts` sets `reading`, `ui` and `mono`. `tokens`
+  are light mode (and every mode for tokens set once, like radii); `dark` is dark mode.
+- Tokens: `surface-page|raised|sunken`, `text`, `text-muted`, `border`,
+  `intent-neutral|primary|success|warning|danger` and each `-soft`, `mark`, `diff-insert`,
+  `diff-delete`, `radius-sm|md|pill`. Values are plain CSS, without `;`, braces, `<`, `>` or `\`.
+- Unknown keys and bad values are refused (`CONFIG_INVALID`), not ignored. A running
+  `review --serve` keeps its theme; restart it to see changes.
 
 ## When claims and work disagree
 
