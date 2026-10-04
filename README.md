@@ -31,13 +31,23 @@ It is part of the cntxt-labs set: **bd** for work, **medha** for rules, **anvesa
 - a SessionStart hook that, in a repository with `.yojana/`, tells Claude so and lists open
   changes and decisions waiting on a person (log only; it never calls bd or anvesa).
 
-It runs the CLI from this checkout, so set up the checkout first (see Develop), then in Claude
+It runs the CLI from a checkout, so set up the checkout first (see Develop), then in Claude
 Code:
 
 ```
 /plugin marketplace add <path to this repository>
 /plugin install yojana@yojana
 ```
+
+An installed plugin is a copy of `claude-plugin/` alone, so tell it where the checkout is with
+`YOJANA_HOME`, for example in `~/.claude/settings.json`:
+
+```json
+{ "env": { "YOJANA_HOME": "/path/to/yojana" } }
+```
+
+Without `YOJANA_HOME`, `yojana` works only when the plugin runs in place:
+`claude --plugin-dir claude-plugin`.
 
 ## Develop
 
