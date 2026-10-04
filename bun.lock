@@ -107,11 +107,11 @@
 
     "@cfworker/json-schema": ["@cfworker/json-schema@4.1.1", "", {}, "sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og=="],
 
-    "@cntxt-labs/patra-core": ["@cntxt-labs/patra-core@./vendor/patra/cntxt-labs-patra-core-0.0.0.tgz", { "dependencies": { "@cfworker/json-schema": "4.1.1", "@types/mustache": "^4.2.6", "mustache": "4.2.0" } }, "sha512-YX2AyI7OCBlZv/ZfsoS3Cr+DUHx4uQfXJmmL2epf3576KxyX8nNXMHgdLSyW/x6CrCLkRVaKz4FVF9pqom+ZRw=="],
+    "@cntxt-labs/patra-core": ["@cntxt-labs/patra-core@./vendor/patra/cntxt-labs-patra-core-0.0.0.tgz", { "dependencies": { "@cfworker/json-schema": "4.1.1", "@types/mustache": "^4.2.6", "mustache": "4.2.0" } }, "sha512-9kcihpX1X3if/ZlBwBMpaisVptZBR0MxIdKgXg4T3MU+txw1hZd055CpwYyFBo5VPU4BSY/lFidv13/jq5GWtw=="],
 
     "@cntxt-labs/patra-serve": ["@cntxt-labs/patra-serve@../vendor/patra/cntxt-labs-patra-serve-0.0.0.tgz", { "dependencies": { "@cntxt-labs/patra-core": "0.0.0", "htmx.org": "2.0.4" } }, "sha512-T0mNBAZ+1fHBZT3jAHxBCbeftCxpHVRVnYHTjfUqnyniw14yYAqJ8rGo2kwAFYis4oKK0Ru4JKkzG1OLaQwAlA=="],
 
-    "@cntxt-labs/patra-templates": ["@cntxt-labs/patra-templates@../vendor/patra/cntxt-labs-patra-templates-0.0.0.tgz", {}, "sha512-k2jf7/YPUbRoxSzIGG3hRZZtXbBQCoY8ynvbJRDYHh9lyoG4dBdJhreqiHIFuZLJwJfdzIPSvw05Ub0nn4kqVA=="],
+    "@cntxt-labs/patra-templates": ["@cntxt-labs/patra-templates@../vendor/patra/cntxt-labs-patra-templates-0.0.0.tgz", {}, "sha512-OCHpc8a3ngFnyMw5rNcuX/zrSZWA2o9aJVX747Hf2lSC+UATweBrECi8l4Rvgb5ekNoEm5uTJ5IFX8MVwAVOJg=="],
 
     "@cntxt-labs/patra-themes": ["@cntxt-labs/patra-themes@../vendor/patra/cntxt-labs-patra-themes-0.0.0.tgz", {}, "sha512-rr/SSnKH3RcTMfP0Ihm9S67xSSF2zI+p2Gb6Wll2PUpU2/L2o5f+X7/KQnEzDP5ngiwe5w/eegVJsHlHEOQIWw=="],
 

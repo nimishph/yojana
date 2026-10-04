@@ -95,6 +95,8 @@ expect: false
 | bring log edits back into plan files | `yojana refresh` |
 | start a plan from an existing roadmap | `yojana import <file> --id plan/<name>` |
 | review page in the browser | `/yojana:review` (Claude Code) or `/yojana-review` (opencode) |
+| a plan with its state as data, to write a PR body, issue comment or other document from | `yojana review <plan> --content` (JSON; writes no file) |
+| a PDF of a plan | `yojana review <plan>`, then print `.yojana/review/<name>.html` (a browser, or headless Chrome `--print-to-pdf`); the page prints without its controls |
 | settings in effect, and where the config file is | `yojana config` |
 
 Add `--json` for machine-readable output. Exit code 1 means refused, violated or failed; the

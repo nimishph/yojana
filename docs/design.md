@@ -205,6 +205,12 @@ the text and is highlighted on the page. When the requirement gets a new revisio
 marked outdated and the highlight is dropped, rather than the comment disappearing or attaching to
 text it was not about. Plan text is escaped on the page; it is data, never markup.
 
+`yojana review [plan] --content` prints what the page is drawn from instead: patra's
+review-document content as JSON (one object, or a list when no plan is named), carrying the plan
+with its claim results, progress, approvals, threads, changes and pending decisions. Other formats
+are made from it, or from the page: printed, the page drops its controls and puts the threads and
+changes after the document, so a PDF needs no exporter in yojana.
+
 `yojana review --serve [--check] [--port n]` serves the same page live, on 127.0.0.1 only, with
 two edit modes and the comment threads:
 
@@ -236,6 +242,7 @@ yojana check [plan] [--strict]            verify claims against the code
 yojana repair                             recover a corrupt log
 yojana comment <plan> <req> "<text>"      note on a requirement (--quote, --reply)
 yojana review [plan] [--check]            HTML review page in .yojana/review/
+yojana review [plan] --content           the page's content as JSON, for other formats
 yojana review --serve [--check]           the same page, live: edit, suggest, accept, comment
 yojana import <file> --id <plan-id>       start a plan from an existing Markdown roadmap
 ```

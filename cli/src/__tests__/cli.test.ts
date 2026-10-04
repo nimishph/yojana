@@ -12,6 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run } from '../main.ts';
+import { reviewTemplate } from '../serve.ts';
 
 const PLAN = `---
 id: plan/demo
@@ -170,6 +171,27 @@ describe('yojana CLI, start to finish', () => {
     const html = readFileSync(join(root, '.yojana', 'review', 'demo.html'), 'utf8');
     expect(html).toContain('Link the docs site too.');
     expect(readFileSync(join(root, '.yojana', '.gitignore'), 'utf8')).toContain('review/');
+  });
+
+  test('review --content prints the page content as JSON and writes no file', async () => {
+    rmSync(join(root, '.yojana', 'review'), { recursive: true, force: true });
+    expect((await yojana('comment', 'plan/demo', 'readme', 'Link the docs site too.')).code).toBe(
+      0,
+    );
+    const one = await yojana('review', 'plan/demo', '--content');
+    expect(one.code).toBe(0);
+    const content = JSON.parse(one.out);
+    expect(content.document.title).toBeString();
+    expect(content.sections.length).toBeGreaterThan(0);
+    expect(JSON.stringify(content.threads)).toContain('Link the docs site too.');
+    expect(existsSync(join(root, '.yojana', 'review'))).toBe(false);
+    // patra's own check of the content against the template's schema.
+    expect(reviewTemplate().check(content)).toEqual([]);
+
+    const all = JSON.parse((await yojana('review', '--content')).out);
+    expect(Array.isArray(all)).toBe(true);
+    expect((await yojana('review', 'plan/demo', '--content', '--serve')).code).toBe(2);
+    expect((await yojana('review', 'plan/nope', '--content')).out).toContain('PLAN_NOT_FOUND');
   });
 
   test('decide proposes, decisions finalizes and applies; a missing bd is recorded as a failure', async () => {

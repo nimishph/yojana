@@ -58,6 +58,8 @@ Usage:
   yojana repair                             keep a corrupt log's readable events, move the rest aside
   yojana comment <plan> <req> "<text>"      note on a requirement [--quote "<span>"] [--reply <id>]
   yojana review [plan] [--check] [--out f]  write a read-only copy of the page (.yojana/review/)
+  yojana review [plan] --content            print the page's content as JSON (the plan and its
+                                            state: claims, progress, threads, changes); no file
   yojana review --serve [--port n]          the review page, live: comment, edit, suggest, accept
   yojana decide <plan> <req> <item> close|reopen --reason <text> [--final]
                                             propose a decision on a work item (--final: decide it)
@@ -126,6 +128,7 @@ interface Flags {
   readonly quote: string | undefined;
   readonly reply: string | undefined;
   readonly serve: boolean;
+  readonly content: boolean;
   readonly port: number;
   readonly apply: boolean;
   readonly final: boolean;
@@ -153,6 +156,7 @@ function parseFlags(argv: readonly string[]): Flags {
     quote: undefined as string | undefined,
     reply: undefined as string | undefined,
     serve: false,
+    content: false,
     port: DEFAULT_PORT,
     apply: false,
     final: false,
@@ -178,6 +182,7 @@ function parseFlags(argv: readonly string[]): Flags {
     else if (arg === '--quote') flags.quote = value();
     else if (arg === '--reply') flags.reply = value();
     else if (arg === '--serve') flags.serve = true;
+    else if (arg === '--content') flags.content = true;
     else if (arg === '--apply') flags.apply = true;
     else if (arg === '--final') flags.final = true;
     else if (arg === '--finalize') flags.finalize = value();
@@ -767,6 +772,12 @@ async function runServe(flags: Flags, write: Write): Promise<number> {
 }
 
 function runReview(flags: Flags, write: Write): Promise<number> {
+  if (flags.content && (flags.serve || flags.out !== undefined)) {
+    throw new YojanaError(
+      'CLI_USAGE',
+      '--content prints the content; it does not go with --serve or --out',
+    );
+  }
   if (flags.serve) return runServe(flags, write);
   return withWorkspace(flags, async (ws) => {
     const state = foldLog(await ws.store.events());
@@ -787,14 +798,26 @@ function runReview(flags: Flags, write: Write): Promise<number> {
       you: person(),
       mode: 'read',
     });
-    const template = reviewTemplate();
-    const head = pageHead(template, themeStylesheet(loadConfig(), themeFile('default')), []);
-    const written: string[] = [];
-    for (const planId of planIds) {
+    const load = async (planId: string) => {
       const content = await session.load(REVIEW_TEMPLATE, planId);
       if (content === undefined) {
         throw new YojanaError('PLAN_NOT_FOUND', `the log has no plan ${planId}`);
       }
+      return content;
+    };
+    // The content alone, for other tools to turn into what they need: one plan's object, or a
+    // list when no plan is named.
+    if (flags.content) {
+      const contents = await Promise.all(planIds.map(load));
+      write(`${JSON.stringify(named === undefined ? contents : contents[0], null, 2)}
+`);
+      return 0;
+    }
+    const template = reviewTemplate();
+    const head = pageHead(template, themeStylesheet(loadConfig(), themeFile('default')), []);
+    const written: string[] = [];
+    for (const planId of planIds) {
+      const content = await load(planId);
       const page = renderPage(template, content, { head });
       if (!page.ok) {
         throw new YojanaError(
