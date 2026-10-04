@@ -204,6 +204,70 @@ describe('yojana CLI, start to finish', () => {
     expect((await yojana('decisions')).out).toContain(`${id}  failed`);
   });
 
+  test('an agent proposes a status and cannot decide it; a person finalizes or declines', async () => {
+    const file = join(root, 'plans', 'status.md');
+    const write = (status: string) =>
+      writeFileSync(
+        file,
+        `---\nid: plan/status\nstatus: ${status}\n---\n\n## Requirement: clear {#clear}\n\nIt is clear.\n`,
+      );
+    write('draft');
+    expect((await yojana('ingest')).code).toBe(0);
+    const asAgent = async (...args: string[]) => {
+      const person = process.env.YOJANA_ACTOR;
+      delete process.env.YOJANA_ACTOR;
+      process.env.YOJANA_AGENT = 'claude';
+      try {
+        return await yojana(...args);
+      } finally {
+        process.env.YOJANA_ACTOR = person;
+        delete process.env.YOJANA_AGENT;
+      }
+    };
+
+    // The agent edits the status line: a proposal, and the plan stays draft.
+    write('accepted');
+    expect((await asAgent('ingest')).out).toContain(
+      'status  accepted proposed (stays draft until a person finalizes it',
+    );
+    const listed = await yojana('decisions');
+    expect(listed.out).toContain('proposed   status accepted  (plan/status, by claude)');
+    const id =
+      listed.out
+        .split('\n')
+        .find((l) => l.includes('plan/status'))
+        ?.split(' ')[0] ?? '';
+    expect(await asAgent('decisions', '--finalize', id)).toMatchObject({ code: 1 });
+    expect(await asAgent('approve', 'plan/status', 'clear')).toMatchObject({ code: 1 });
+    expect(
+      await asAgent('propose-status', 'plan/status', 'realized', '--reason', 'x', '--final'),
+    ).toMatchObject({
+      code: 1,
+    });
+
+    // The person declines: the file's status line goes back to what the log says.
+    expect((await yojana('decisions', '--decline', id, '--reason', 'not yet')).out).toBe(
+      `${id}  declined; plan/status stays as it is\n`,
+    );
+    expect(readFileSync(file, 'utf8')).toContain('status: draft');
+
+    // A proposal from the command line, finalized by the person: the file follows the log.
+    const proposed = await asAgent(
+      'propose-status',
+      'plan/status',
+      'accepted',
+      '--reason',
+      'clear now',
+    );
+    const second = proposed.out.split(' ')[0] ?? '';
+    expect((await yojana('decisions', '--finalize', second)).out).toBe(
+      `${second}  plan/status moved to accepted\n`,
+    );
+    expect(readFileSync(file, 'utf8')).toContain('status: accepted');
+    expect((await yojana('approve', 'plan/status', 'clear')).out).toContain('approved at r_');
+    expect((await yojana('decisions')).out).not.toContain('plan/status');
+  });
+
   test('import writes a plan from a roadmap, and will not overwrite without --force', async () => {
     writeFileSync(
       join(root, 'ROADMAP.md'),

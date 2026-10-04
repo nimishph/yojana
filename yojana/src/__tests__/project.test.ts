@@ -196,7 +196,12 @@ describe('projector', () => {
       source: 'plans/p.md',
       freshness: 'claims checked just now',
     });
-    expect(doc?.metrics.map((m) => m.label)).toEqual(['1 hold', '1 violated', 'file in step']);
+    expect(doc?.metrics.map((m) => m.label)).toEqual([
+      '1 hold',
+      '1 violated',
+      'file in step',
+      '0/3 approved',
+    ]);
   });
 
   test('health, tags and flags: close?, reopen?, and an open change', async () => {
@@ -204,7 +209,7 @@ describe('projector', () => {
     const [doneOpen, closedBroken, unlinked] = content?.sections ?? [];
     expect(doneOpen).toMatchObject({
       health: 'success',
-      tags: ['close', 'attention'],
+      tags: ['close', 'attention', 'unapproved'],
       note: 'close? · 2 threads',
       flags: [
         {
@@ -219,14 +224,14 @@ describe('projector', () => {
     ]);
     expect(closedBroken).toMatchObject({
       health: 'danger',
-      tags: ['violated', 'attention'],
+      tags: ['violated', 'attention', 'unapproved'],
       note: 'reopen?',
       flags: [{ intent: 'danger', buttons: [{ decision: 'reopen', item: 'b-closed' }] }],
       evidence: [{ label: 'fake absent · no match', intent: 'danger' }],
     });
     expect(unlinked).toMatchObject({
       health: 'neutral',
-      tags: ['attention'],
+      tags: ['attention', 'unapproved'],
       note: '1 change',
       proposed: {
         kind: 'diff',
@@ -238,6 +243,7 @@ describe('projector', () => {
       { id: 'attention', label: 'Needs attention', count: 3, active: true },
       { id: 'close', label: 'Close?', count: 1 },
       { id: 'violated', label: 'Violated', count: 1 },
+      { id: 'unapproved', label: 'Not approved', count: 3 },
     ]);
   });
 

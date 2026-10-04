@@ -23,4 +23,7 @@ Read the `yojana` skill first for the file format and the rules.
 3. Run `yojana ingest`, then `yojana check plan/<short-name>`. Some claims about work not done
    yet are expected to fail; anything that fails because the claim itself is wrong, fix now.
 4. Show the person the requirements and which claims already hold, and offer `/yojana:review`
-   to read and comment on it in the browser. The plan stays `draft` until they accept it.
+   to read, comment and approve requirements in the browser. The plan stays `draft` until they
+   accept it. When they say it is ready, propose it with
+   `yojana propose-status plan/<short-name> accepted --reason "…"`; they accept it on the page
+   (or decline it). Do not set `status: accepted` yourself and call it done.

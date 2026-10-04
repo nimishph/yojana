@@ -10,7 +10,9 @@ export {
 } from './events.ts';
 export {
   type Anomaly,
+  type Approval,
   applyEvent,
+  approvalOf,
   type ChangeState,
   type ChangeStatus,
   type DecisionState,
@@ -21,8 +23,11 @@ export {
   isAnnotationOutdated,
   openAnomalies,
   type PlanState,
+  type ProposalStatus,
   planHeads,
   type StatusEntry,
+  type StatusProposal,
+  waitingProposals,
 } from './fold.ts';
 export {
   type Annotation,

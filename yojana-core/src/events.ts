@@ -27,6 +27,29 @@ export type YojanaEventInput =
       readonly planId: string;
       readonly to: PlanStatus;
       readonly reason: string;
+      /** The proposal this finalizes, when the change was proposed first. */
+      readonly proposal?: string | undefined;
+    }
+  /**
+   * A change of the plan's status, asked for: an agent proposes, a person finalizes it (a
+   * `status-changed` naming the proposal) or declines it. Its id is this event's `eventId`.
+   */
+  | {
+      readonly type: 'status-proposed';
+      readonly planId: string;
+      readonly to: PlanStatus;
+      readonly reason: string;
+    }
+  | { readonly type: 'status-declined'; readonly proposalId: string; readonly reason: string }
+  /**
+   * A person approved a requirement as it read at `revision`. An approval is a review mark, not a
+   * gate; it goes stale once the requirement moves past that revision.
+   */
+  | {
+      readonly type: 'requirement-approved';
+      readonly planId: string;
+      readonly requirement: RequirementId;
+      readonly revision: RevisionHash;
     }
   | { readonly type: 'annotation-added'; readonly planId: string; readonly annotation: Annotation }
   | {

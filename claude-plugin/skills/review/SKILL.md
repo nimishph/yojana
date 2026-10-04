@@ -22,5 +22,7 @@ disable-model-invocation: true
    write needs the token the page carries.
 4. What the person does on the page is recorded as them, not as you. Their edits rewrite the
    plan files, accepted changes move to `changes/archive/`, and a decision on a bead is finalized
-   and applied through bd at once.
+   and applied through bd at once. They can approve requirements one by one, and accept (or
+   decline) a proposed status, or move the plan to its next status; the plan file's `status:`
+   line follows.
 5. Leave the server running until the person is done; stop it when they say so.

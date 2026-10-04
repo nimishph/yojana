@@ -23,7 +23,8 @@ It is part of the cntxt-labs set: **bd** for work, **medha** for rules, **anvesa
 [`claude-plugin/`](claude-plugin) makes yojana available inside Claude Code:
 
 - the `yojana` skill: plan and change file formats, commands, and the rule that Claude proposes
-  (suggested changes, `yojana decide`) while the person decides;
+  (suggested changes, `yojana decide`, `yojana propose-status`) while the person decides: only a
+  person accepts a plan, moves its status, or approves a requirement;
 - `/yojana:plan <what>` drafts a plan with checkable claims; `/yojana:review` opens the live
   review pages;
 - a `yojana` command on Claude's PATH that records its actions as `claude` (pages served by

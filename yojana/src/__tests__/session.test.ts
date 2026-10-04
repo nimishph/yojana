@@ -116,7 +116,7 @@ describe('review session', () => {
     expect(handler).toBeFunction();
     const content = await session.load('review-document', 'plan/s');
     expect(template.check(content)).toEqual([]);
-    expect(content?.sections[0]).toMatchObject({ tags: ['close', 'attention'] });
+    expect(content?.sections[0]).toMatchObject({ tags: ['close', 'attention', 'unapproved'] });
     expect(await session.load('review-document', 'plan/none')).toBeUndefined();
     expect(await session.load('other', 'plan/s')).toBeUndefined();
     expect(await session.plans()).toEqual([{ id: 'plan/s', status: 'accepted', requirements: 2 }]);

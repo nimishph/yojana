@@ -1,5 +1,6 @@
 import {
   type Annotation,
+  approvalOf,
   type ChangeState,
   type ClaimResult,
   type Delta,
@@ -12,7 +13,9 @@ import {
   type PlanStatus,
   planHeads,
   type Requirement,
+  type StatusProposal,
   type WorkDecision,
+  waitingProposals,
   type YojanaEvent,
 } from '@cntxt-labs/yojana-core';
 import { quotePosition } from './comment.ts';
@@ -65,7 +68,17 @@ export interface ReviewSection {
   readonly proposed?: Formatted;
   readonly evidence: readonly Chip[];
   readonly flags?: readonly { text: string; intent?: Intent; buttons?: readonly Button[] }[];
+  readonly buttons?: readonly Button[];
   readonly editable: { readonly title: string; readonly text: string };
+}
+
+/** A decision on the whole plan (its status), with what to weigh before making it. */
+export interface ReviewCallout {
+  readonly id: string;
+  readonly text: string;
+  readonly intent?: Intent;
+  readonly notes?: readonly Chip[];
+  readonly buttons?: readonly Button[];
 }
 
 interface Reply {
@@ -117,6 +130,7 @@ export interface ReviewDocument {
     readonly freshness: string;
   };
   readonly filters: readonly { id: string; label: string; count: number; active?: boolean }[];
+  readonly callouts: readonly ReviewCallout[];
   readonly sections: readonly ReviewSection[];
   readonly threads: readonly ReviewThread[];
   readonly changes: readonly ReviewChange[];
@@ -145,7 +159,18 @@ export interface ProjectOptions {
 
 /** Recent events shown in the activity rail. */
 export const ACTIVITY_LIMIT = 12;
-const DEFAULT_AGENTS: readonly string[] = ['claude'];
+const DEFAULT_AGENTS: readonly string[] = ['claude', 'opencode'];
+
+/** The status a plan usually moves to next, offered on the page when nothing is proposed. */
+const NEXT_STATUS: Readonly<Partial<Record<PlanStatus, PlanStatus>>> = {
+  draft: 'accepted',
+  accepted: 'in-progress',
+  'in-progress': 'realized',
+};
+
+/** The key of a callout for a waiting proposal; `next` is the plain offer of the next status. */
+export const PROPOSAL_CALLOUT = 'proposal:';
+export const NEXT_CALLOUT = 'next';
 const MINUTE_MS = 60_000;
 const MINUTES_PER_HOUR = 60;
 const MINUTES_PER_DAY = 1440;
@@ -288,6 +313,7 @@ export function projectReview(options: ProjectOptions): ReviewDocument | undefin
     },
     { id: 'close', label: 'Close?', count: count('close') },
     { id: 'violated', label: 'Violated', count: count('violated') },
+    { id: 'unapproved', label: 'Not approved', count: count('unapproved') },
   ];
 
   const tally = (o: ClaimResult['outcome']) => checks.filter((c) => c.outcome === o).length;
@@ -322,7 +348,37 @@ export function projectReview(options: ProjectOptions): ReviewDocument | undefin
       : pending === 0
         ? [{ label: 'file in step', intent: 'success' as const }]
         : [{ label: `${plural(pending, 'pending file edit')}`, intent: 'warning' as const }]),
+    ...(sections.length === 0
+      ? []
+      : [
+          {
+            label: `${sections.length - count('unapproved')}/${sections.length} approved`,
+            ...(count('unapproved') === 0 ? { intent: 'success' as const } : {}),
+          },
+        ]),
   ];
+
+  // What to weigh before changing the plan's status: warnings, never a gate.
+  const liveThreads = threads.filter((t) => !t.outdated).length;
+  const unapproved = count('unapproved');
+  const weigh: Chip[] = [
+    ...(unapproved > 0
+      ? [
+          {
+            label: `${unapproved} of ${plural(sections.length, 'requirement')} not approved, or changed since`,
+            intent: 'warning' as const,
+          },
+        ]
+      : []),
+    ...(liveThreads > 0 ? [{ label: plural(liveThreads, 'open thread') }] : []),
+    ...(changes.length > 0
+      ? [{ label: plural(changes.length, 'open change'), intent: 'warning' as const }]
+      : []),
+    ...(pending !== undefined && pending > 0
+      ? [{ label: `${plural(pending, 'file edit')} not ingested`, intent: 'warning' as const }]
+      : []),
+  ];
+  const callouts = projectCallouts(plan, waitingProposals(state, plan.id), weigh);
 
   const anomalies = openAnomalies(state).filter(
     (a) => a.planId === undefined || a.planId === plan.id,
@@ -359,6 +415,7 @@ export function projectReview(options: ProjectOptions): ReviewDocument | undefin
           : `claims checked ${when(options.checkedAt)}${options.checkedAt >= now - MINUTE_MS ? '' : ' ago'}`,
     },
     filters,
+    callouts,
     sections,
     threads,
     changes,
@@ -388,10 +445,13 @@ function projectSection(input: {
     (a) => a.requirement === r.id && a.replyTo === undefined,
   ).length;
 
+  const approval = approvalOf(plan, r.id);
   const tags: string[] = [];
   if (alignment?.mismatch === 'claims-hold-work-open') tags.push('close');
   if (health === 'danger') tags.push('violated');
   if (tags.length > 0 || touching.length > 0 || contested) tags.push('attention');
+  // Not yet approved is for the person's own review pass, not something needing attention.
+  if (approval === undefined || approval.stale) tags.push('unapproved');
 
   const note = [
     alignment?.mismatch === 'claims-hold-work-open' ? 'close?' : '',
@@ -419,6 +479,13 @@ function projectSection(input: {
               intent: health,
             },
           ]),
+    ...(approval === undefined
+      ? []
+      : [
+          approval.stale
+            ? { label: `approved by ${approval.by}, changed since`, intent: 'warning' as const }
+            : { label: `approved by ${approval.by}`, intent: 'success' as const },
+        ]),
   ];
 
   // Decisions not yet applied speak for their items, so the mismatch flags leave those out.
@@ -529,6 +596,13 @@ function projectSection(input: {
         }),
     evidence,
     ...(flags.length > 0 ? { flags } : {}),
+    ...(approval === undefined || approval.stale
+      ? {
+          buttons: [
+            { action: 'approve', label: approval === undefined ? 'Approve' : 'Approve again' },
+          ],
+        }
+      : {}),
     editable: { title: r.title, text: r.text },
   };
 }
@@ -606,8 +680,29 @@ function projectActivity(
         return ofPlan(event.changeId)
           ? `rejected “${changeTitle(event.changeId)}”: ${event.reason}`
           : undefined;
-      case 'status-changed':
-        return event.planId === plan.id ? `moved the plan to ${event.to}` : undefined;
+      case 'status-changed': {
+        if (event.planId !== plan.id) return undefined;
+        const by = event.proposal === undefined ? undefined : state.proposals.get(event.proposal);
+        return by === undefined || by.proposedBy === event.actor
+          ? `moved the plan to ${event.to}`
+          : `accepted ${by.proposedBy}'s proposal: moved the plan to ${event.to}`;
+      }
+      case 'status-proposed': {
+        // Proposed and finalized by the same person: the move tells it.
+        if (event.planId !== plan.id) return undefined;
+        const p = state.proposals.get(event.eventId);
+        return p?.status === 'accepted' && p.decidedBy === event.actor
+          ? undefined
+          : `proposed moving the plan to ${event.to}: ${event.reason}`;
+      }
+      case 'status-declined': {
+        const p = state.proposals.get(event.proposalId);
+        return p?.planId === plan.id
+          ? `declined moving the plan to ${p.to}: ${event.reason}`
+          : undefined;
+      }
+      case 'requirement-approved':
+        return event.planId === plan.id ? `approved “${titleOf(event.requirement)}”` : undefined;
       case 'annotation-added':
         if (event.planId !== plan.id) return undefined;
         return event.annotation.replyTo === undefined
@@ -658,4 +753,46 @@ function projectActivity(
     });
   }
   return out;
+}
+
+/**
+ * Callouts: one for each proposal waiting on a person, or, when nothing is proposed, the plain
+ * offer of the plan's next status. Each carries what to weigh first.
+ */
+function projectCallouts(
+  plan: PlanState,
+  waiting: readonly StatusProposal[],
+  weigh: readonly Chip[],
+): ReviewCallout[] {
+  const notes: readonly Chip[] =
+    weigh.length > 0
+      ? weigh
+      : [{ label: 'every requirement approved; no open threads or changes', intent: 'success' }];
+  const verb = (to: PlanStatus) => (to === 'accepted' ? 'Accept the plan' : `Move to ${to}`);
+  if (waiting.length > 0) {
+    return waiting.map((p) => ({
+      id: `${PROPOSAL_CALLOUT}${p.id}`,
+      text: `${p.proposedBy} proposes moving this plan from ${plan.status} to ${p.to}: “${p.reason}”`,
+      intent: 'primary',
+      notes,
+      buttons: [
+        { action: 'confirm', label: verb(p.to), decision: p.to, primary: true },
+        { action: 'decline', label: 'Not yet' },
+      ],
+    }));
+  }
+  const next = NEXT_STATUS[plan.status];
+  if (next === undefined) return [];
+  return [
+    {
+      id: NEXT_CALLOUT,
+      text:
+        plan.status === 'draft'
+          ? 'This plan is a draft. Accept it once its requirements say what you want.'
+          : `This plan is ${plan.status}. Move it to ${next} when that is true.`,
+      intent: 'neutral',
+      notes,
+      buttons: [{ action: 'confirm', label: verb(next), decision: next }],
+    },
+  ];
 }

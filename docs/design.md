@@ -87,7 +87,15 @@ later as a render-only adapter.
 ## Lifecycle
 
 `draft → accepted → in-progress → realized`, or at any point `superseded` / `abandoned`. Every
-transition is an event with an actor and a reason. Progress is derived from linked beads, never
+transition is an event with an actor and a reason.
+
+A status change is a person's decision. An agent proposes one (`status-proposed`, from
+`yojana propose-status` or from an edited `status:` line it ingests); a person finalizes it (a
+`status-changed` naming the proposal) or declines it (`status-declined`, and the file's status
+line is put back). A person may also move a plan in one step. On the review page a callout offers
+the proposal, or the next status, with what to weigh first: requirements not approved (or changed
+since their approval), open threads, open changes, edits not ingested. These are warnings, not a
+gate. Approvals (`requirement-approved`) are per requirement and pinned to the revision read. Progress is derived from linked beads, never
 typed in. An open change older than a set number of days (default 14) is reported as stale.
 
 ## Changes and conflicts

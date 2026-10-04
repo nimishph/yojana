@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { YojanaEvent, YojanaEventInput } from '../events.ts';
-import { foldLog, isAnnotationOutdated, openAnomalies, planHeads } from '../fold.ts';
+import { approvalOf, foldLog, isAnnotationOutdated, openAnomalies, planHeads } from '../fold.ts';
 import type { Requirement } from '../model.ts';
 import { requirementRevision } from '../revision.ts';
 
@@ -315,5 +315,59 @@ describe('foldLog: concurrent edits after a merge', () => {
     );
     expect(state.anomalies).toEqual([]);
     expect(state.plans.get('p')?.contested.size).toBe(0);
+  });
+});
+
+describe('status proposals and approvals', () => {
+  test('a proposal is finalized by the status change naming it, or declined', () => {
+    const state = foldLog(
+      log(
+        { type: 'status-proposed', planId: 'p', to: 'accepted', reason: 'ready' },
+        { type: 'status-changed', planId: 'p', to: 'accepted', reason: 'ready', proposal: 'e_1' },
+        { type: 'status-proposed', planId: 'p', to: 'realized', reason: 'done' },
+        { type: 'status-declined', proposalId: 'e_3', reason: 'not yet' },
+      ),
+    );
+    expect(state.plans.get('p')?.status).toBe('accepted');
+    expect([...state.proposals.values()]).toMatchObject([
+      { id: 'e_1', status: 'accepted', decidedBy: 'tester' },
+      { id: 'e_3', status: 'declined', outcome: 'not yet' },
+    ]);
+    expect(openAnomalies(state)).toEqual([]);
+  });
+
+  test('deciding a proposal twice, or one that does not exist, is an anomaly', () => {
+    const state = foldLog(
+      log(
+        { type: 'status-proposed', planId: 'p', to: 'accepted', reason: 'ready' },
+        { type: 'status-declined', proposalId: 'e_1', reason: 'no' },
+        { type: 'status-changed', planId: 'p', to: 'accepted', reason: 'yes', proposal: 'e_1' },
+        { type: 'status-declined', proposalId: 'e_9', reason: 'no' },
+      ),
+    );
+    // The move itself is recorded: the log is the source of truth.
+    expect(state.plans.get('p')?.status).toBe('accepted');
+    expect(openAnomalies(state).map((a) => a.code)).toEqual([
+      'PROPOSAL_OUT_OF_STEP',
+      'PROPOSAL_OUT_OF_STEP',
+    ]);
+  });
+
+  test('the latest approval of a requirement is kept, with its revision', () => {
+    const state = foldLog(
+      log(
+        { type: 'revision-recorded', planId: 'p', requirement: a1 },
+        { type: 'requirement-approved', planId: 'p', requirement: 'a', revision: a1.revision },
+        { type: 'revision-recorded', planId: 'p', requirement: a2, base: a1.revision },
+      ),
+    );
+    const plan = state.plans.get('p');
+    expect(plan && approvalOf(plan, 'a')).toEqual({
+      revision: a1.revision,
+      by: 'tester',
+      at: 1001,
+      stale: true,
+    });
+    expect(plan && approvalOf(plan, 'b')).toBeUndefined();
   });
 });

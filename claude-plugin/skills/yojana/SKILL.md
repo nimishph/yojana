@@ -19,6 +19,15 @@ plan still matches the code.
 - **Plan text.** You may write and edit a plan while it is `draft`. Once it is `accepted` or
   later, suggest instead: write a change file and open it, so the person sees a diff and accepts
   or rejects it. Edit an accepted plan directly only when the person asks you to.
+- **Plan status.** A plan's status is the person's decision. Propose a move with
+  `yojana propose-status <plan> <status> --reason "…"` (or by editing the `status:` line and
+  running `yojana ingest`, which records your edit as a proposal). The plan stays where it is until
+  the person accepts it on the review page or with `yojana decisions --finalize <id>`, or declines
+  it, which puts the file's status line back. You cannot finalize, decline, or pass `--final`.
+- **Approvals.** The person approves requirements one by one, on the page or with `yojana approve`;
+  an approval is for the revision they read and goes stale when it changes. Approving is theirs
+  alone, and approvals never block a status change: the page lists what is unapproved, open
+  threads and open changes as things to weigh.
 - **Work items.** Never close or reopen a bead yourself because a plan says the work is done.
   Propose it with `yojana decide` (without `--final`). The person finalizes it on the review page
   or with `yojana decisions --finalize`. Only then does `yojana decisions --apply` run `bd close`.
@@ -81,7 +90,8 @@ expect: false
 | list, accept, reject changes | `yojana changes`, `yojana archive <id>`, `yojana abandon <id> --reason "…"` |
 | comment on a requirement | `yojana comment <plan> <req> "text" [--quote "span"] [--reply <id>]` |
 | propose a decision on a bead | `yojana decide <plan> <req> <bead> close\|reopen --reason "…"` |
-| decisions waiting, and their outcomes | `yojana decisions [--all]` |
+| propose moving a plan (draft → accepted, …) | `yojana propose-status <plan> <status> --reason "…"` |
+| what waits on the person (bead decisions, status proposals) | `yojana decisions [--all]` |
 | bring log edits back into plan files | `yojana refresh` |
 | start a plan from an existing roadmap | `yojana import <file> --id plan/<name>` |
 | review page in the browser | `/yojana:review` (Claude Code) or `/yojana-review` (opencode) |

@@ -111,7 +111,7 @@
 
     "@cntxt-labs/patra-serve": ["@cntxt-labs/patra-serve@../vendor/patra/cntxt-labs-patra-serve-0.0.0.tgz", { "dependencies": { "@cntxt-labs/patra-core": "0.0.0", "htmx.org": "2.0.4" } }, "sha512-yJ1opvfPcTTKAo5CFHmPVmLf3o14wxVehA2hefR9ve7n15wg0MxNySgOhq21XFVG/IRA+znjBcDZy2Hjl1eZ3g=="],
 
-    "@cntxt-labs/patra-templates": ["@cntxt-labs/patra-templates@../vendor/patra/cntxt-labs-patra-templates-0.0.0.tgz", {}, "sha512-IuQPNzNne2qzexc+ZdKibnWOvn1hs+ceWPysTJqnVQGKCs+wEDVKg1wgoOjkYHWUdg8TSCoXxl3XJKBfa1fNdQ=="],
+    "@cntxt-labs/patra-templates": ["@cntxt-labs/patra-templates@../vendor/patra/cntxt-labs-patra-templates-0.0.0.tgz", {}, "sha512-SwDuywXHpOL2bk2ijBYUdTH5XMtXeEUAYaQLMT+/SlTkRS961EkZEYk7yAj80708SHEu4ZZnxD6X7AaKmApJOA=="],
 
     "@cntxt-labs/patra-themes": ["@cntxt-labs/patra-themes@../vendor/patra/cntxt-labs-patra-themes-0.0.0.tgz", {}, "sha512-rr/SSnKH3RcTMfP0Ihm9S67xSSF2zI+p2Gb6Wll2PUpU2/L2o5f+X7/KQnEzDP5ngiwe5w/eegVJsHlHEOQIWw=="],
 

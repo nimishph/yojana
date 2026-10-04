@@ -35,6 +35,15 @@ export {
   type RequirementOutcome,
   type StatusOutcome,
 } from './ingest.ts';
+export {
+  type ApprovalResult,
+  approveRequirement,
+  declineStatus,
+  finalizeStatus,
+  type ProposalResult,
+  proposeStatus,
+  settleStatusLine,
+} from './plan-status.ts';
 export { type ItemProgress, type PlanProgress, progress } from './progress.ts';
 export {
   ACTIVITY_LIMIT,

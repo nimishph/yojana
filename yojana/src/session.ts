@@ -12,7 +12,20 @@ import { type CheckReport, check } from './check.ts';
 import { comment } from './comment.ts';
 import { applyDecisions, recordDecision } from './decisions.ts';
 import { editRequirement, suggestEdit } from './edit.ts';
-import { projectReview, type ReviewDocument, type ReviewSection } from './project.ts';
+import {
+  approveRequirement,
+  declineStatus,
+  finalizeStatus,
+  proposeStatus,
+  settleStatusLine,
+} from './plan-status.ts';
+import {
+  NEXT_CALLOUT,
+  PROPOSAL_CALLOUT,
+  projectReview,
+  type ReviewDocument,
+  type ReviewSection,
+} from './project.ts';
 import { status } from './status.ts';
 import { loadPlanFiles, openWorkspace, settleChangeFile, type Workspace } from './workspace.ts';
 
@@ -344,6 +357,78 @@ export function reviewSession(options: ReviewSessionOptions): ReviewSession {
           ids: [recorded.decision.id],
         });
         workCache.clear();
+        return PAGE;
+      }
+
+      case 'approve': {
+        const result = await approveRequirement({
+          store: ws.store,
+          planId,
+          requirement: key,
+          revision: intent.version,
+          actor: intent.actor,
+          agent: false,
+        });
+        if (!result.ok) {
+          return refuse(
+            result.code,
+            result.code === 'STALE'
+              ? 'This requirement changed since the page was loaded; reload and read it again before approving.'
+              : result.message,
+          );
+        }
+        // The approval count and the status callout's warnings change with it.
+        return PAGE;
+      }
+
+      case 'confirm':
+      case 'decline': {
+        // A person at the page decides: finalize or decline a waiting proposal, or move the plan
+        // to the status the page offers. The plan file's status line follows.
+        const proposalId = key.startsWith(PROPOSAL_CALLOUT)
+          ? key.slice(PROPOSAL_CALLOUT.length)
+          : undefined;
+        const decided =
+          proposalId === undefined
+            ? intent.action === 'confirm' && key === NEXT_CALLOUT
+              ? await proposeStatus({
+                  store: ws.store,
+                  planId,
+                  to: field('decision'),
+                  reason: field('reason') || 'on the review page',
+                  actor: intent.actor,
+                  agent: false,
+                  finalize: true,
+                })
+              : ({
+                  ok: false,
+                  code: 'NOT_FOUND',
+                  message: 'Nothing is proposed here; reload the page.',
+                } as const)
+            : intent.action === 'confirm'
+              ? await finalizeStatus({
+                  store: ws.store,
+                  proposalId,
+                  reason: field('reason'),
+                  actor: intent.actor,
+                  agent: false,
+                })
+              : await declineStatus({
+                  store: ws.store,
+                  proposalId,
+                  reason: field('reason'),
+                  actor: intent.actor,
+                  agent: false,
+                });
+        if (!decided.ok) return refuse(decided.code, decided.message);
+        await settleStatusLine({
+          store: ws.store,
+          parser: ws.parser,
+          bases: ws.bases,
+          files: files(),
+          writePlan,
+          proposal: decided.proposal,
+        });
         return PAGE;
       }
 

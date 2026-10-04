@@ -8,14 +8,17 @@ import {
   type ArchiveResult,
   abandonChange,
   applyDecisions,
+  approveRequirement,
   archiveChange,
   type ChangeProblem,
   type CheckReport,
   check,
   comment,
+  declineStatus,
   ensureGitAttributes,
   type FileReport,
   finalizeDecision,
+  finalizeStatus,
   type IngestReport,
   importAndValidate,
   ingest,
@@ -23,12 +26,15 @@ import {
   type OpenChangeResult,
   openChange,
   openWorkspace,
+  type ProposalResult,
+  proposeStatus,
   REVIEW_TEMPLATE,
   recordDecision,
   refresh,
   reviewSession,
   type StatusReport,
   settleChangeFile,
+  settleStatusLine,
   status,
   VERSION,
   type Workspace,
@@ -55,9 +61,13 @@ Usage:
   yojana review --serve [--port n]          the review page, live: comment, edit, suggest, accept
   yojana decide <plan> <req> <item> close|reopen --reason <text> [--final]
                                             propose a decision on a work item (--final: decide it)
-  yojana decisions [--apply] [--finalize <id>]
-                                            decisions on work items; --apply runs finalized ones
+  yojana decisions [--apply] [--finalize <id>] [--decline <id> --reason <text>]
+                                            what waits on a person: decisions on work items and
+                                            status proposals; --apply runs finalized decisions
                                             through bd (bd close / bd reopen), retrying failures
+  yojana propose-status <plan> <status> --reason <text> [--final]
+                                            propose moving a plan (--final: a person moves it)
+  yojana approve <plan> <req>               approve a requirement as it reads now (a person)
   yojana import <file> --id <plan-id>       start a plan from an existing Markdown roadmap
                 [--prefix <bead-prefix>] [--out <path>] [--force]
   yojana check [plan] [--strict]            verify plan claims against the code
@@ -72,6 +82,10 @@ Options:
   --strict           check: also fail when a claim cannot be verified
   --check            status: also run the claim checks
   --stale-days <n>   status: an open change older than this is stale (default 14)
+
+An agent (YOJANA_AGENT set, YOJANA_ACTOR not) proposes; only a person finalizes or declines a
+status change or approves a requirement. When an agent ingests, a changed status line becomes a
+proposal.
 
 Exit codes: 0 done; 1 refused, violated, invalid or failed (the output says which); 2 usage error.
 Errors carry a code (STORE_CORRUPT, CLI_USAGE, ...) and usually a hint; with --json they are
@@ -116,6 +130,7 @@ interface Flags {
   readonly apply: boolean;
   readonly final: boolean;
   readonly finalize: string | undefined;
+  readonly decline: string | undefined;
   readonly positional: readonly string[];
 }
 
@@ -142,6 +157,7 @@ function parseFlags(argv: readonly string[]): Flags {
     apply: false,
     final: false,
     finalize: undefined as string | undefined,
+    decline: undefined as string | undefined,
     positional: [] as string[],
   };
   for (let i = 0; i < argv.length; i++) {
@@ -165,6 +181,7 @@ function parseFlags(argv: readonly string[]): Flags {
     else if (arg === '--apply') flags.apply = true;
     else if (arg === '--final') flags.final = true;
     else if (arg === '--finalize') flags.finalize = value();
+    else if (arg === '--decline') flags.decline = value();
     else if (arg === '--port') {
       const port = Number(value());
       if (!Number.isInteger(port) || port < 0 || port > MAX_PORT) {
@@ -202,6 +219,11 @@ function actor(): string {
  */
 function person(): string {
   return process.env.YOJANA_ACTOR ?? userInfo().username;
+}
+
+/** Whether the command runs as an agent: YOJANA_AGENT set and no YOJANA_ACTOR naming a person. */
+function isAgent(): boolean {
+  return process.env.YOJANA_ACTOR === undefined && (process.env.YOJANA_AGENT ?? '') !== '';
 }
 
 function toSource(root: string, path: string): string {
@@ -260,7 +282,11 @@ function describeFile(file: FileReport): string[] {
     );
   }
   const s = file.status;
-  if (s !== undefined && s.log === undefined && s.movement === 'edited') {
+  if (s?.proposed === true) {
+    lines.push(
+      `  status  ${s.file} proposed (stays ${s.log ?? 'draft'} until a person finalizes it: yojana decisions)`,
+    );
+  } else if (s !== undefined && s.log === undefined && s.movement === 'edited') {
     lines.push(`  status  ${s.file}  (new plan)`);
   } else if (s !== undefined) {
     lines.push(
@@ -305,6 +331,7 @@ function runIngest(flags: Flags, write: Write): Promise<number> {
       files: loadPlanFiles(flags.root, ws.plansDir),
       actor: actor(),
       trustFile: flags.trustFile,
+      agent: isAgent(),
     });
     emit(flags, write, report, describeIngest(report));
     return report.files.some((f) => f.outcome === 'refused' || f.outcome === 'invalid') ? 1 : 0;
@@ -543,8 +570,72 @@ function runDecide(flags: Flags, write: Write): Promise<number> {
   });
 }
 
+/** After a status proposal is decided: say so, and bring the plan file's status line in step. */
+async function settleProposal(
+  flags: Flags,
+  write: Write,
+  ws: Workspace,
+  result: ProposalResult,
+): Promise<number> {
+  if (!result.ok) {
+    emit(flags, write, result, `${result.code}: ${result.message}\n`);
+    return 1;
+  }
+  const p = result.proposal;
+  await settleStatusLine({
+    store: ws.store,
+    parser: ws.parser,
+    bases: ws.bases,
+    files: loadPlanFiles(flags.root, ws.plansDir),
+    writePlan: (source, text) => writeFileSync(join(flags.root, source), text),
+    proposal: p,
+  });
+  const what =
+    p.status === 'accepted'
+      ? `${p.planId} moved to ${p.to}`
+      : p.status === 'declined'
+        ? `declined; ${p.planId} stays as it is`
+        : `proposed ${p.planId} -> ${p.to}; a person finalizes it on the review page or with yojana decisions --finalize ${p.id}`;
+  emit(flags, write, result, `${p.id}  ${what}\n`);
+  return 0;
+}
+
 function runDecisions(flags: Flags, write: Write): Promise<number> {
   return withWorkspace(flags, async (ws) => {
+    const proposals = foldLog(await ws.store.events()).proposals;
+    if (flags.decline !== undefined) {
+      if (!proposals.has(flags.decline)) {
+        throw new YojanaError('NOT_FOUND', `no status proposal ${flags.decline}`, {
+          hint: 'only status proposals are declined; see yojana decisions',
+        });
+      }
+      return settleProposal(
+        flags,
+        write,
+        ws,
+        await declineStatus({
+          store: ws.store,
+          proposalId: flags.decline,
+          reason: flags.reason ?? '',
+          actor: actor(),
+          agent: isAgent(),
+        }),
+      );
+    }
+    if (flags.finalize !== undefined && proposals.has(flags.finalize)) {
+      return settleProposal(
+        flags,
+        write,
+        ws,
+        await finalizeStatus({
+          store: ws.store,
+          proposalId: flags.finalize,
+          reason: flags.reason,
+          actor: actor(),
+          agent: isAgent(),
+        }),
+      );
+    }
     if (flags.finalize !== undefined) {
       const result = await finalizeDecision({
         store: ws.store,
@@ -573,17 +664,78 @@ function runDecisions(flags: Flags, write: Write): Promise<number> {
     const decisions = [...foldLog(await ws.store.events()).decisions.values()].filter(
       (d) => flags.all || d.status !== 'applied',
     );
-    const lines = decisions
-      .map(
+    const statusProposals = [...proposals.values()].filter(
+      (p) => flags.all || p.status === 'proposed',
+    );
+    const width = 'finalized'.length;
+    const lines = [
+      ...statusProposals.map(
+        (p) =>
+          `${p.id}  ${p.status.padEnd(width)}  status ${p.to}  (${p.planId}, by ${p.decidedBy ?? p.proposedBy}): ${p.outcome ?? p.reason}\n`,
+      ),
+      ...decisions.map(
         (d) =>
-          `${d.id}  ${d.status.padEnd('finalized'.length)}  ${d.decision} ${d.item}  (${d.planId} ${d.requirement}, by ${d.finalizedBy ?? d.recordedBy}): ${d.outcome ?? d.reason}\n`,
-      )
-      .join('');
+          `${d.id}  ${d.status.padEnd(width)}  ${d.decision} ${d.item}  (${d.planId} ${d.requirement}, by ${d.finalizedBy ?? d.recordedBy}): ${d.outcome ?? d.reason}\n`,
+      ),
+    ].join('');
     emit(
       flags,
       write,
-      { decisions },
+      { decisions, proposals: statusProposals },
       lines === '' ? `no ${flags.all ? '' : 'pending '}decisions\n` : lines,
+    );
+    return 0;
+  });
+}
+
+function runProposeStatus(flags: Flags, write: Write): Promise<number> {
+  const [planId, to] = flags.positional;
+  if (planId === undefined || to === undefined || flags.reason === undefined) {
+    throw new YojanaError(
+      'CLI_USAGE',
+      'usage: yojana propose-status <plan> <status> --reason <text> [--final]',
+    );
+  }
+  return withWorkspace(flags, async (ws) =>
+    settleProposal(
+      flags,
+      write,
+      ws,
+      await proposeStatus({
+        store: ws.store,
+        planId,
+        to,
+        reason: flags.reason ?? '',
+        actor: actor(),
+        agent: isAgent(),
+        finalize: flags.final,
+      }),
+    ),
+  );
+}
+
+function runApprove(flags: Flags, write: Write): Promise<number> {
+  const [planId, requirement] = flags.positional;
+  if (planId === undefined || requirement === undefined) {
+    throw new YojanaError('CLI_USAGE', 'usage: yojana approve <plan> <requirement>');
+  }
+  return withWorkspace(flags, async (ws) => {
+    const result = await approveRequirement({
+      store: ws.store,
+      planId,
+      requirement,
+      actor: actor(),
+      agent: isAgent(),
+    });
+    if (!result.ok) {
+      emit(flags, write, result, `${result.code}: ${result.message}\n`);
+      return 1;
+    }
+    emit(
+      flags,
+      write,
+      result,
+      `${planId} ${requirement}  ${result.already ? 'already approved' : 'approved'} at ${result.revision}\n`,
     );
     return 0;
   });
@@ -969,6 +1121,8 @@ export async function run(argv: readonly string[], write: Write): Promise<number
     if (command === 'comment') return await runComment(flags(), write);
     if (command === 'decide') return await runDecide(flags(), write);
     if (command === 'decisions') return await runDecisions(flags(), write);
+    if (command === 'propose-status') return await runProposeStatus(flags(), write);
+    if (command === 'approve') return await runApprove(flags(), write);
     if (command === 'review') return await runReview(flags(), write);
     if (command === 'config') return runConfig(flags(), write);
   } catch (error) {

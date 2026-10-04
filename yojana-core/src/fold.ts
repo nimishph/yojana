@@ -36,6 +36,32 @@ export interface PlanState {
   readonly annotations: Annotation[];
   /** Work items the plan names, from its latest `work-linked` event. */
   workItems: readonly string[];
+  /** The latest approval of each requirement, whatever its revision. */
+  readonly approvals: Map<RequirementId, Approval>;
+}
+
+export interface Approval {
+  readonly revision: RevisionHash;
+  readonly by: string;
+  readonly at: number;
+}
+
+/** proposed: waiting for a person; accepted: the plan moved; declined: a person said not yet. */
+export type ProposalStatus = 'proposed' | 'accepted' | 'declined';
+
+export interface StatusProposal {
+  readonly id: string;
+  readonly planId: string;
+  readonly to: PlanStatus;
+  readonly reason: string;
+  readonly proposedBy: string;
+  readonly proposedAt: number;
+  status: ProposalStatus;
+  decidedBy: string | undefined;
+  /** When it last changed status. */
+  at: number;
+  /** Why it was declined. */
+  outcome: string | undefined;
 }
 
 export type ChangeStatus = 'open' | 'archived' | 'abandoned';
@@ -97,13 +123,22 @@ export interface FoldState {
   readonly changes: Map<string, ChangeState>;
   /** Decisions on work items, by id, in the order they were recorded. */
   readonly decisions: Map<string, DecisionState>;
+  /** Proposed changes of plan status, by id, in the order they were proposed. */
+  readonly proposals: Map<string, StatusProposal>;
   readonly anomalies: Anomaly[];
   /** Highest seq folded so far. */
   head: number;
 }
 
 export function emptyFoldState(): FoldState {
-  return { plans: new Map(), changes: new Map(), decisions: new Map(), anomalies: [], head: 0 };
+  return {
+    plans: new Map(),
+    changes: new Map(),
+    decisions: new Map(),
+    proposals: new Map(),
+    anomalies: [],
+    head: 0,
+  };
 }
 
 function planFor(state: FoldState, id: string): PlanState {
@@ -117,6 +152,7 @@ function planFor(state: FoldState, id: string): PlanState {
       contested: new Map(),
       annotations: [],
       workItems: [],
+      approvals: new Map(),
     };
     state.plans.set(id, plan);
   }
@@ -229,6 +265,21 @@ export function applyEvent(state: FoldState, event: YojanaEvent): void {
     }
     case 'status-changed': {
       const plan = planFor(state, event.planId);
+      if (event.proposal !== undefined) {
+        const proposal = state.proposals.get(event.proposal);
+        if (proposal === undefined || proposal.status !== 'proposed') {
+          state.anomalies.push({
+            seq,
+            code: 'PROPOSAL_OUT_OF_STEP',
+            message: `status proposal ${event.proposal} is ${proposal?.status ?? 'unknown'}; the plan moved to ${event.to} anyway`,
+            planId: plan.id,
+          });
+        } else {
+          proposal.status = 'accepted';
+          proposal.decidedBy = event.actor;
+          proposal.at = event.at;
+        }
+      }
       plan.status = event.to;
       plan.statusHistory.push({
         to: event.to,
@@ -236,6 +287,46 @@ export function applyEvent(state: FoldState, event: YojanaEvent): void {
         actor: event.actor,
         at: event.at,
         seq,
+      });
+      return;
+    }
+    case 'status-proposed': {
+      planFor(state, event.planId);
+      state.proposals.set(event.eventId, {
+        id: event.eventId,
+        planId: event.planId,
+        to: event.to,
+        reason: event.reason,
+        proposedBy: event.actor,
+        proposedAt: event.at,
+        status: 'proposed',
+        decidedBy: undefined,
+        at: event.at,
+        outcome: undefined,
+      });
+      return;
+    }
+    case 'status-declined': {
+      const proposal = state.proposals.get(event.proposalId);
+      if (proposal === undefined || proposal.status !== 'proposed') {
+        state.anomalies.push({
+          seq,
+          code: 'PROPOSAL_OUT_OF_STEP',
+          message: `status proposal ${event.proposalId} is ${proposal?.status ?? 'unknown'}; status-declined ignored`,
+        });
+        return;
+      }
+      proposal.status = 'declined';
+      proposal.decidedBy = event.actor;
+      proposal.at = event.at;
+      proposal.outcome = event.reason;
+      return;
+    }
+    case 'requirement-approved': {
+      planFor(state, event.planId).approvals.set(event.requirement, {
+        revision: event.revision,
+        by: event.actor,
+        at: event.at,
       });
       return;
     }
@@ -315,6 +406,23 @@ export function planHeads(state: FoldState, planId: string): Map<RequirementId, 
     heads.set(id, requirement.revision);
   }
   return heads;
+}
+
+/** An approval is stale once its requirement has moved past the revision that was approved. */
+export function approvalOf(
+  plan: PlanState,
+  requirement: RequirementId,
+): (Approval & { readonly stale: boolean }) | undefined {
+  const approval = plan.approvals.get(requirement);
+  if (approval === undefined) return undefined;
+  return { ...approval, stale: plan.heads.get(requirement)?.revision !== approval.revision };
+}
+
+/** Proposals of a plan still waiting for a person, oldest first. */
+export function waitingProposals(state: FoldState, planId: string): StatusProposal[] {
+  return [...state.proposals.values()].filter(
+    (p) => p.planId === planId && p.status === 'proposed',
+  );
 }
 
 /** An annotation is outdated once its requirement has moved past the revision it was made on. */

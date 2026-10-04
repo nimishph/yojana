@@ -26,6 +26,10 @@ import {
  * conflict. Its version is recorded on top of the log even when it equals the log's.
  *
  * A plan is ingested all or nothing. Re-running with no edits appends nothing.
+ *
+ * The status line is a person's decision. When an agent ingests (`agent`), an edited status is
+ * recorded as a proposal for a person to finalize, and the plan stays where it was: a new plan
+ * starts as draft. Its base keeps the log's status, so the edit stays visible until it is decided.
  */
 
 export interface PlanFile {
@@ -49,6 +53,8 @@ export interface IngestOptions {
    * `recorded` then means "would record". Used by status.
    */
   readonly dryRun?: boolean | undefined;
+  /** The actor is an agent: a status edit becomes a proposal instead of a change of status. */
+  readonly agent?: boolean | undefined;
 }
 
 export type Movement = 'same' | 'edited' | 'behind' | 'conflict';
@@ -69,6 +75,8 @@ export interface StatusOutcome {
   readonly file: PlanStatus;
   readonly base: PlanStatus | undefined;
   readonly log: PlanStatus | undefined;
+  /** An agent's edit: proposed for a person to finalize (or already waiting), not recorded. */
+  readonly proposed?: boolean | undefined;
 }
 
 export interface FileReport {
@@ -174,10 +182,21 @@ export async function ingest(options: IngestOptions): Promise<IngestReport> {
     }
 
     const statusMove = movement<PlanStatus>(plan.status, baseStatus, logStatus);
+    // An agent's status edit is a proposal; a new plan it writes starts as draft.
+    const proposing =
+      options.agent === true &&
+      statusMove === 'edited' &&
+      !(logStatus === undefined && plan.status === 'draft');
     const status: StatusOutcome | undefined =
       statusMove === 'same'
         ? undefined
-        : { movement: statusMove, file: plan.status, base: baseStatus, log: logStatus };
+        : {
+            movement: statusMove,
+            file: plan.status,
+            base: baseStatus,
+            log: logStatus,
+            ...(proposing ? { proposed: true } : {}),
+          };
 
     const refused = statusMove === 'conflict' || outcomes.some((o) => o.movement === 'conflict');
     if (refused) {
@@ -196,13 +215,38 @@ export async function ingest(options: IngestOptions): Promise<IngestReport> {
     }
 
     const events: YojanaEventInput[] = [];
-    if (status?.movement === 'edited') {
+    if (proposing) {
+      if (logStatus === undefined) {
+        events.push({
+          type: 'status-changed',
+          planId: plan.id,
+          to: 'draft',
+          reason: `created from ${file.source}`,
+        });
+      }
+      const waiting = [...state.proposals.values()].some(
+        (p) => p.planId === plan.id && p.to === plan.status && p.status === 'proposed',
+      );
+      if (!waiting) {
+        events.push({
+          type: 'status-proposed',
+          planId: plan.id,
+          to: plan.status,
+          reason: `${logStatus === undefined ? 'set' : 'edited'} in ${file.source}`,
+        });
+      }
+    } else if (status?.movement === 'edited') {
+      // A person's edit finalizes a proposal of the same status that was waiting.
+      const proposal = [...state.proposals.values()].find(
+        (p) => p.planId === plan.id && p.to === plan.status && p.status === 'proposed',
+      );
       events.push({
         type: 'status-changed',
         planId: plan.id,
         to: plan.status,
         reason:
           logStatus === undefined ? `created from ${file.source}` : `edited in ${file.source}`,
+        ...(proposal === undefined ? {} : { proposal: proposal.id }),
       });
     }
     // Work items are plan metadata, not requirements: the file's list replaces the log's when
@@ -229,7 +273,11 @@ export async function ingest(options: IngestOptions): Promise<IngestReport> {
       appended += events.length;
       await bases.set({
         planId: plan.id,
-        status: status?.movement === 'behind' ? baseStatus : plan.status,
+        status: proposing
+          ? (logStatus ?? 'draft')
+          : status?.movement === 'behind'
+            ? baseStatus
+            : plan.status,
         revisions: nextBase,
       });
     }
