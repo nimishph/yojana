@@ -1,0 +1,6 @@
+<form class="inline" data-patra-form="remove">
+  <input type="hidden" name="item" value="{{values.item}}">
+  <p>Remove this {{#values.item}}reply{{/values.item}}{{^values.item}}comment{{/values.item}}? It leaves the page; the record that it was written and removed is kept.</p>
+  {{#error}}<p class="error" role="alert">{{error}}</p>{{/error}}
+  <div class="actions"><button type="submit" class="primary">Remove</button><button type="button" data-patra-cancel>Cancel</button></div>
+</form>

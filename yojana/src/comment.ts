@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { type Annotation, foldLog, type StorePort } from '@cntxt-labs/yojana-core';
+import {
+  type Annotation,
+  foldLog,
+  isAnnotationRemoved,
+  type StorePort,
+} from '@cntxt-labs/yojana-core';
 
 /**
  * Comment: a review note on one requirement, recorded in the log against the requirement's
@@ -53,6 +58,41 @@ export async function comment(options: {
   await options.store.append(
     { type: 'annotation-added', planId: options.planId, annotation },
     options.author,
+  );
+  return { ok: true, annotation };
+}
+
+export type RemoveCommentResult =
+  | { readonly ok: true; readonly annotation: Annotation }
+  | { readonly ok: false; readonly code: string; readonly message: string };
+
+/**
+ * Remove a comment or reply from the page; only its author may. The log keeps that it was written and that it was
+ * removed; a removed comment with replies still shows, as removed, so the replies keep their place.
+ */
+export async function removeComment(options: {
+  readonly store: StorePort;
+  readonly planId: string;
+  readonly id: string;
+  readonly actor: string;
+}): Promise<RemoveCommentResult> {
+  const fail = (code: string, message: string): RemoveCommentResult => ({
+    ok: false,
+    code,
+    message,
+  });
+  const plan = foldLog(await options.store.events()).plans.get(options.planId);
+  if (plan === undefined) return fail('PLAN_NOT_FOUND', `the log has no plan ${options.planId}`);
+  const annotation = plan.annotations.find((a) => a.id === options.id);
+  if (annotation === undefined || isAnnotationRemoved(plan, options.id)) {
+    return fail('COMMENT_NOT_FOUND', `no comment ${options.id} on ${options.planId}`);
+  }
+  if (annotation.author !== options.actor) {
+    return fail('NOT_YOURS', `${options.id} is ${annotation.author}'s; only its author removes it`);
+  }
+  await options.store.append(
+    { type: 'annotation-removed', planId: options.planId, annotationId: options.id },
+    options.actor,
   );
   return { ok: true, annotation };
 }

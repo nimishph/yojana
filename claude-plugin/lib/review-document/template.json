@@ -1,0 +1,165 @@
+{
+  "id": "review-document",
+  "version": "0.1.0",
+  "description": "A long document with an outline and a review rail: sections with properties, evidence and flags; threads pinned to quotes; changes as diffs to accept or reject; callouts that ask for a decision on the whole document; an activity feed.",
+  "page": "page.html",
+  "schema": "content.schema.json",
+  "styles": ["template.css"],
+  "parts": {
+    "section": {
+      "file": "parts/section.html",
+      "collection": "/sections",
+      "key": "id"
+    },
+    "callout": {
+      "file": "parts/callout.html",
+      "collection": "/callouts",
+      "key": "id"
+    },
+    "outline-item": {
+      "file": "parts/outline-item.html",
+      "collection": "/sections",
+      "key": "id"
+    },
+    "thread": {
+      "file": "parts/thread.html",
+      "collection": "/threads",
+      "key": "id"
+    },
+    "change": {
+      "file": "parts/change.html",
+      "collection": "/changes",
+      "key": "id"
+    },
+    "activity-item": {
+      "file": "parts/activity-item.html",
+      "collection": "/activity",
+      "key": "id"
+    },
+    "form-edit": {
+      "file": "parts/form-edit.html"
+    },
+    "form-suggest": {
+      "file": "parts/form-suggest.html"
+    },
+    "form-comment": {
+      "file": "parts/form-comment.html"
+    },
+    "form-reply": {
+      "file": "parts/form-reply.html"
+    },
+    "form-reject": {
+      "file": "parts/form-reject.html"
+    },
+    "form-decide": {
+      "file": "parts/form-decide.html"
+    },
+    "form-confirm": {
+      "file": "parts/form-confirm.html"
+    },
+    "form-decline": {
+      "file": "parts/form-decline.html"
+    },
+    "form-remove": {
+      "file": "parts/form-remove.html"
+    },
+    "form-decline-section": {
+      "file": "parts/form-decline-section.html"
+    }
+  },
+  "actions": {
+    "edit": {
+      "part": "section",
+      "form": "form-edit",
+      "fields": ["title", "text"],
+      "defaults": {
+        "title": "/editable/title",
+        "text": "/editable/text"
+      }
+    },
+    "suggest": {
+      "part": "section",
+      "form": "form-suggest",
+      "fields": ["title", "text", "why"],
+      "defaults": {
+        "title": "/editable/title",
+        "text": "/editable/text"
+      }
+    },
+    "comment": {
+      "part": "section",
+      "form": "form-comment",
+      "fields": ["body", "quote"]
+    },
+    "reply": {
+      "part": "thread",
+      "form": "form-reply",
+      "fields": ["body"]
+    },
+    "remove": {
+      "part": "thread",
+      "form": "form-remove",
+      "fields": ["item"]
+    },
+    "accept": {
+      "part": "change",
+      "fields": []
+    },
+    "reject": {
+      "part": "change",
+      "form": "form-reject",
+      "fields": ["reason"]
+    },
+    "decide": {
+      "part": "section",
+      "form": "form-decide",
+      "fields": ["item", "decision", "reason"]
+    },
+    "approve": {
+      "part": "section",
+      "fields": []
+    },
+    "decline-section": {
+      "part": "section",
+      "form": "form-decline-section",
+      "fields": ["reason"]
+    },
+    "confirm": {
+      "part": "callout",
+      "form": "form-confirm",
+      "fields": ["decision", "reason"]
+    },
+    "decline": {
+      "part": "callout",
+      "form": "form-decline",
+      "fields": ["reason"]
+    }
+  },
+  "tokens": [
+    "--surface-page",
+    "--surface-raised",
+    "--surface-sunken",
+    "--text",
+    "--text-muted",
+    "--border",
+    "--intent-neutral",
+    "--intent-neutral-soft",
+    "--intent-primary",
+    "--intent-primary-soft",
+    "--intent-success",
+    "--intent-success-soft",
+    "--intent-warning",
+    "--intent-warning-soft",
+    "--intent-danger",
+    "--intent-danger-soft",
+    "--mark",
+    "--diff-insert",
+    "--diff-delete",
+    "--font-reading",
+    "--font-ui",
+    "--font-mono",
+    "--radius-sm",
+    "--radius-md",
+    "--radius-pill"
+  ]
+}

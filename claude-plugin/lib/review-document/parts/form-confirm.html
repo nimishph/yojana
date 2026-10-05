@@ -1,0 +1,7 @@
+<form class="inline" data-patra-form="confirm">
+  <input type="hidden" name="decision" value="{{values.decision}}">
+  <p>{{text}}</p>
+  <label><span class="label">Reason (optional)</span><input name="reason" value="{{values.reason}}"></label>
+  {{#error}}<p class="error" role="alert">{{error}}</p>{{/error}}
+  <div class="actions"><button type="submit" class="primary">Confirm</button><button type="button" data-patra-cancel>Cancel</button></div>
+</form>

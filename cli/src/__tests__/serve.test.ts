@@ -127,6 +127,33 @@ describe('review --serve on patra', () => {
     expect(page).toContain('page-user');
   });
 
+  test('your comment offers Remove, through its form; a section offers Decline', async () => {
+    const page = await (await fetch(`${server.url}/d/review-document/${DOC}`)).text();
+    const thread = /data-patra-part="thread" data-patra-key="([^"]+)"/.exec(page)?.[1] ?? '';
+    expect(page).toContain('<button type="button" class="link" data-patra-action="remove">');
+    expect(page).toContain('data-patra-action="decline-section"');
+
+    const form = await fetch(
+      `${server.url}/f/review-document/${DOC}/remove?key=${encodeURIComponent(thread)}`,
+    );
+    expect(await form.text()).toContain('Remove this comment?');
+    const removed = await post('remove', { _key: thread, item: '' });
+    expect(removed.headers.get('HX-Refresh')).toBe('true');
+    expect(await (await fetch(`${server.url}/d/review-document/${DOC}`)).text()).not.toContain(
+      'Good.',
+    );
+
+    const declined = await post('decline-section', {
+      _key: 'beta',
+      _version: await versionOf('beta'),
+      reason: 'Name the release.',
+    });
+    expect(declined.headers.get('HX-Refresh')).toBe('true');
+    expect(await (await fetch(`${server.url}/d/review-document/${DOC}`)).text()).toContain(
+      'declined by page-user: Name the release.',
+    );
+  });
+
   test('a refused action answers with its reason; writes need the token', async () => {
     const refused = await post('reject', { _key: 'no-such-change', reason: 'x' });
     expect(refused.status).toBe(400);

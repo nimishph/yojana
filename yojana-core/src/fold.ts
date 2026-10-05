@@ -34,16 +34,22 @@ export interface PlanState {
    */
   readonly contested: Map<RequirementId, (RevisionHash | undefined)[]>;
   readonly annotations: Annotation[];
+  /** Comments removed, by id: they stay in `annotations` so replies keep their thread. */
+  readonly removedAnnotations: Map<string, { readonly by: string; readonly at: number }>;
   /** Work items the plan names, from its latest `work-linked` event. */
   workItems: readonly string[];
-  /** The latest approval of each requirement, whatever its revision. */
+  /** The latest verdict (approved or declined) on each requirement, whatever its revision. */
   readonly approvals: Map<RequirementId, Approval>;
 }
 
+/** A person's verdict on a requirement as it read at `revision`. */
 export interface Approval {
+  readonly verdict: 'approved' | 'declined';
   readonly revision: RevisionHash;
   readonly by: string;
   readonly at: number;
+  /** Why it was declined. */
+  readonly reason?: string | undefined;
 }
 
 /** proposed: waiting for a person; accepted: the plan moved; declined: a person said not yet. */
@@ -151,6 +157,7 @@ function planFor(state: FoldState, id: string): PlanState {
       heads: new Map(),
       contested: new Map(),
       annotations: [],
+      removedAnnotations: new Map(),
       workItems: [],
       approvals: new Map(),
     };
@@ -324,9 +331,20 @@ export function applyEvent(state: FoldState, event: YojanaEvent): void {
     }
     case 'requirement-approved': {
       planFor(state, event.planId).approvals.set(event.requirement, {
+        verdict: 'approved',
         revision: event.revision,
         by: event.actor,
         at: event.at,
+      });
+      return;
+    }
+    case 'requirement-declined': {
+      planFor(state, event.planId).approvals.set(event.requirement, {
+        verdict: 'declined',
+        revision: event.revision,
+        by: event.actor,
+        at: event.at,
+        reason: event.reason,
       });
       return;
     }
@@ -336,6 +354,19 @@ export function applyEvent(state: FoldState, event: YojanaEvent): void {
     }
     case 'annotation-added': {
       planFor(state, event.planId).annotations.push(event.annotation);
+      return;
+    }
+    case 'annotation-removed': {
+      const plan = planFor(state, event.planId);
+      if (!plan.annotations.some((a) => a.id === event.annotationId)) {
+        state.anomalies.push({
+          seq,
+          code: 'ANNOTATION_UNKNOWN',
+          message: `no comment ${event.annotationId} on ${event.planId}; annotation-removed ignored`,
+        });
+        return;
+      }
+      plan.removedAnnotations.set(event.annotationId, { by: event.actor, at: event.at });
       return;
     }
     case 'decision-recorded': {
@@ -406,6 +437,11 @@ export function planHeads(state: FoldState, planId: string): Map<RequirementId, 
     heads.set(id, requirement.revision);
   }
   return heads;
+}
+
+/** Whether a comment was removed from the page. */
+export function isAnnotationRemoved(plan: PlanState, id: string): boolean {
+  return plan.removedAnnotations.has(id);
 }
 
 /** An approval is stale once its requirement has moved past the revision that was approved. */

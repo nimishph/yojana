@@ -1,0 +1,7 @@
+<form class="inline" data-patra-form="comment">
+  {{#values.quote}}<blockquote>{{values.quote}}</blockquote>{{/values.quote}}
+  <input type="hidden" name="quote" value="{{values.quote}}">
+  <label><span class="label">Comment</span><textarea name="body" rows="3" required>{{values.body}}</textarea></label>
+  {{#error}}<p class="error" role="alert">{{error}}</p>{{/error}}
+  <div class="actions"><button type="submit" class="primary">Comment</button><button type="button" data-patra-cancel>Cancel</button></div>
+</form>

@@ -1,0 +1,10 @@
+<section class="sec" id="{{id}}" data-patra-part="section" data-patra-key="{{id}}" data-patra-version="{{version}}" data-patra-tags="{{#tags}}{{.}} {{/tags}}">
+  <header class="sec-head"><h2>{{title}}</h2><a class="anchor" href="#{{id}}">#{{id}}</a></header>
+  {{#properties.length}}<div class="props">{{#properties}}<span class="chip {{intent}}">{{label}}</span>{{/properties}}</div>{{/properties.length}}
+  {{#flags}}<div class="flag {{intent}}"><span>{{text}}</span>{{#buttons}}<button type="button" class="live-only{{#primary}} primary{{/primary}}" data-patra-action="{{action}}" data-patra-item="{{item}}" data-patra-decision="{{decision}}">{{label}}</button>{{/buttons}}</div>{{/flags}}
+  <div class="sec-body{{#proposed}} has-change{{/proposed}}" data-patra-select>{{body}}</div>
+  {{#proposed}}<div class="sec-body when-change">{{proposed}}</div>{{/proposed}}
+  {{#evidence.length}}<ul class="evidence">{{#evidence}}<li class="{{intent}}">{{label}}</li>{{/evidence}}</ul>{{/evidence.length}}
+  <div class="actions live-only">{{#buttons}}<button type="button" class="{{#primary}}primary{{/primary}}" data-patra-action="{{action}}" data-patra-item="{{item}}" data-patra-decision="{{decision}}">{{label}}</button>{{/buttons}}<button type="button" class="when-edit" data-patra-action="edit">Edit</button><button type="button" class="when-suggest" data-patra-action="suggest">Suggest edit</button><button type="button" data-patra-action="comment">Comment</button></div>
+  <div class="slot" data-patra-slot></div>
+</section>

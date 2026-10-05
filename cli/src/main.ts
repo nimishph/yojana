@@ -14,6 +14,7 @@ import {
   type CheckReport,
   check,
   comment,
+  declineRequirement,
   declineStatus,
   ensureGitAttributes,
   type FileReport,
@@ -31,6 +32,7 @@ import {
   REVIEW_TEMPLATE,
   recordDecision,
   refresh,
+  removeComment,
   reviewSession,
   type StatusReport,
   settleChangeFile,
@@ -57,6 +59,7 @@ Usage:
   yojana status [plan] [--check]            plans, progress, pending edits, open changes
   yojana repair                             keep a corrupt log's readable events, move the rest aside
   yojana comment <plan> <req> "<text>"      note on a requirement [--quote "<span>"] [--reply <id>]
+  yojana remove-comment <plan> <id>         take your own comment or reply off the page
   yojana review [plan] [--check] [--out f]  write a read-only copy of the page (.yojana/review/)
   yojana review [plan] --content            print the page's content as JSON (the plan and its
                                             state: claims, progress, threads, changes); no file
@@ -70,6 +73,8 @@ Usage:
   yojana propose-status <plan> <status> --reason <text> [--final]
                                             propose moving a plan (--final: a person moves it)
   yojana approve <plan> <req>               approve a requirement as it reads now (a person)
+  yojana decline <plan> <req> --reason <text>
+                                            decline it as it reads now, saying why (a person)
   yojana import <file> --id <plan-id>       start a plan from an existing Markdown roadmap
                 [--prefix <bead-prefix>] [--out <path>] [--force]
   yojana check [plan] [--strict]            verify plan claims against the code
@@ -530,6 +535,39 @@ function runComment(flags: Flags, write: Write): Promise<number> {
   });
 }
 
+function runRemoveComment(flags: Flags, write: Write): Promise<number> {
+  const [planId, id] = flags.positional;
+  if (planId === undefined || id === undefined) {
+    throw new YojanaError('CLI_USAGE', 'usage: yojana remove-comment <plan> <comment-id>');
+  }
+  return withWorkspace(flags, async (ws) => {
+    const result = await removeComment({
+      store: ws.store,
+      planId,
+      id,
+      actor: actor(),
+    });
+    if (!result.ok) {
+      emit(
+        flags,
+        write,
+        result,
+        `${result.code}: ${result.message}
+`,
+      );
+      return 1;
+    }
+    emit(
+      flags,
+      write,
+      result,
+      `removed ${id} from ${planId} ${result.annotation.requirement}
+`,
+    );
+    return 0;
+  });
+}
+
 // decisions
 
 function worklink(root: string): BdWorkLink {
@@ -717,6 +755,44 @@ function runProposeStatus(flags: Flags, write: Write): Promise<number> {
       }),
     ),
   );
+}
+
+function runDecline(flags: Flags, write: Write): Promise<number> {
+  const [planId, requirement] = flags.positional;
+  if (planId === undefined || requirement === undefined || (flags.reason ?? '').trim() === '') {
+    throw new YojanaError(
+      'CLI_USAGE',
+      'usage: yojana decline <plan> <requirement> --reason <text>',
+    );
+  }
+  return withWorkspace(flags, async (ws) => {
+    const result = await declineRequirement({
+      store: ws.store,
+      planId,
+      requirement,
+      reason: flags.reason ?? '',
+      actor: actor(),
+      agent: isAgent(),
+    });
+    if (!result.ok) {
+      emit(
+        flags,
+        write,
+        result,
+        `${result.code}: ${result.message}
+`,
+      );
+      return 1;
+    }
+    emit(
+      flags,
+      write,
+      result,
+      `${planId} ${requirement}  ${result.already ? 'already declined' : 'declined'} at ${result.revision}
+`,
+    );
+    return 0;
+  });
 }
 
 function runApprove(flags: Flags, write: Write): Promise<number> {
@@ -1152,6 +1228,8 @@ export async function run(argv: readonly string[], write: Write): Promise<number
     if (command === 'decisions') return await runDecisions(flags(), write);
     if (command === 'propose-status') return await runProposeStatus(flags(), write);
     if (command === 'approve') return await runApprove(flags(), write);
+    if (command === 'decline') return await runDecline(flags(), write);
+    if (command === 'remove-comment') return await runRemoveComment(flags(), write);
     if (command === 'review') return await runReview(flags(), write);
     if (command === 'config') return runConfig(flags(), write);
   } catch (error) {

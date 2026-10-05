@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import type { YojanaEvent, YojanaEventInput } from '../events.ts';
-import { approvalOf, foldLog, isAnnotationOutdated, openAnomalies, planHeads } from '../fold.ts';
+import {
+  approvalOf,
+  foldLog,
+  isAnnotationOutdated,
+  isAnnotationRemoved,
+  openAnomalies,
+  planHeads,
+} from '../fold.ts';
 import type { Requirement } from '../model.ts';
 import { requirementRevision } from '../revision.ts';
 
@@ -363,11 +370,56 @@ describe('status proposals and approvals', () => {
     );
     const plan = state.plans.get('p');
     expect(plan && approvalOf(plan, 'a')).toEqual({
+      verdict: 'approved',
       revision: a1.revision,
       by: 'tester',
       at: 1001,
       stale: true,
     });
     expect(plan && approvalOf(plan, 'b')).toBeUndefined();
+  });
+
+  test('a decline is the other verdict: the latest one stands', () => {
+    const state = foldLog(
+      log(
+        { type: 'revision-recorded', planId: 'p', requirement: a1 },
+        { type: 'requirement-approved', planId: 'p', requirement: 'a', revision: a1.revision },
+        {
+          type: 'requirement-declined',
+          planId: 'p',
+          requirement: 'a',
+          revision: a1.revision,
+          reason: 'too vague',
+        },
+      ),
+    );
+    const plan = state.plans.get('p');
+    expect(plan && approvalOf(plan, 'a')).toMatchObject({
+      verdict: 'declined',
+      reason: 'too vague',
+      stale: false,
+    });
+  });
+
+  test('a removed comment stays for its replies; removing an unknown one is an anomaly', () => {
+    const note = {
+      id: 'n_1',
+      requirement: 'a',
+      revision: a1.revision,
+      author: 'tester',
+      body: 'hi',
+    };
+    const state = foldLog(
+      log(
+        { type: 'revision-recorded', planId: 'p', requirement: a1 },
+        { type: 'annotation-added', planId: 'p', annotation: note },
+        { type: 'annotation-removed', planId: 'p', annotationId: 'n_1' },
+        { type: 'annotation-removed', planId: 'p', annotationId: 'n_9' },
+      ),
+    );
+    const plan = state.plans.get('p');
+    expect(plan?.annotations).toHaveLength(1);
+    expect(plan && isAnnotationRemoved(plan, 'n_1')).toBe(true);
+    expect(openAnomalies(state).map((a) => a.code)).toEqual(['ANNOTATION_UNKNOWN']);
   });
 });

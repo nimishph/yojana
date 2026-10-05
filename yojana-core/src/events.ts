@@ -51,7 +51,20 @@ export type YojanaEventInput =
       readonly requirement: RequirementId;
       readonly revision: RevisionHash;
     }
+  /**
+   * A person declined a requirement as it read at `revision`, saying why: the other verdict to
+   * `requirement-approved`. The latest verdict stands; it too goes stale when the requirement moves.
+   */
+  | {
+      readonly type: 'requirement-declined';
+      readonly planId: string;
+      readonly requirement: RequirementId;
+      readonly revision: RevisionHash;
+      readonly reason: string;
+    }
   | { readonly type: 'annotation-added'; readonly planId: string; readonly annotation: Annotation }
+  /** A comment taken off the page. The log keeps that it was written, and who removed it. */
+  | { readonly type: 'annotation-removed'; readonly planId: string; readonly annotationId: string }
   | {
       /** The plan's work items (bead ids), as the plan file lists them. */
       readonly type: 'work-linked';

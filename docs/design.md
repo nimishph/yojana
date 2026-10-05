@@ -95,7 +95,9 @@ A status change is a person's decision. An agent proposes one (`status-proposed`
 line is put back). A person may also move a plan in one step. On the review page a callout offers
 the proposal, or the next status, with what to weigh first: requirements not approved (or changed
 since their approval), open threads, open changes, edits not ingested. These are warnings, not a
-gate. Approvals (`requirement-approved`) are per requirement and pinned to the revision read. Progress is derived from linked beads, never
+gate. Verdicts are per requirement and pinned to the revision read: `requirement-approved`, or
+`requirement-declined` with the reason, a person's either way; the latest stands, and both go stale
+when the requirement moves. Progress is derived from linked beads, never
 typed in. An open change older than a set number of days (default 14) is reported as stale.
 
 ## Changes and conflicts
@@ -203,7 +205,9 @@ comment threads. `yojana comment <plan> <req> "<text>" [--quote "<span>"] [--rep
 an `annotation-added` event anchored to the requirement's current revision; a quote must appear in
 the text and is highlighted on the page. When the requirement gets a new revision, its comments are
 marked outdated and the highlight is dropped, rather than the comment disappearing or attaching to
-text it was not about. Plan text is escaped on the page; it is data, never markup.
+text it was not about. Plan text is escaped on the page; it is data, never markup. Only a
+comment's author removes it (`annotation-removed`): it leaves the page, and if it has replies it
+stays as a removed placeholder holding them; the log keeps that it was written.
 
 `yojana review [plan] --content` prints what the page is drawn from instead: patra's
 review-document content as JSON (one object, or a list when no plan is named), carrying the plan
@@ -241,6 +245,7 @@ yojana status [plan] [--check]            plans, progress, pending edits, open c
 yojana check [plan] [--strict]            verify claims against the code
 yojana repair                             recover a corrupt log
 yojana comment <plan> <req> "<text>"      note on a requirement (--quote, --reply)
+yojana remove-comment <plan> <id>         take your own comment off the page (annotation-removed)
 yojana review [plan] [--check]            HTML review page in .yojana/review/
 yojana review [plan] --content           the page's content as JSON, for other formats
 yojana review --serve [--check]           the same page, live: edit, suggest, accept, comment

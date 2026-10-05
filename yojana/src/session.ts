@@ -9,17 +9,19 @@ import {
 } from '@cntxt-labs/yojana-core';
 import { abandonChange, archiveChange } from './changes.ts';
 import { type CheckReport, check } from './check.ts';
-import { comment } from './comment.ts';
+import { comment, removeComment } from './comment.ts';
 import { applyDecisions, recordDecision } from './decisions.ts';
 import { editRequirement, suggestEdit } from './edit.ts';
 import {
   approveRequirement,
+  declineRequirement,
   declineStatus,
   finalizeStatus,
   proposeStatus,
   settleStatusLine,
 } from './plan-status.ts';
 import {
+  DECLINE_ACTION,
   NEXT_CALLOUT,
   PROPOSAL_CALLOUT,
   projectReview,
@@ -249,6 +251,17 @@ export function reviewSession(options: ReviewSessionOptions): ReviewSession {
         return result.ok ? PAGE : refuse(result.code, result.message);
       }
 
+      case 'remove': {
+        // The thread's own comment, or one of its replies (the form sends the reply's id).
+        const result = await removeComment({
+          store: ws.store,
+          planId,
+          id: field('item') || key,
+          actor: intent.actor,
+        });
+        return result.ok ? PAGE : refuse(result.code, result.message);
+      }
+
       case 'edit':
       case 'suggest': {
         const request = {
@@ -378,6 +391,27 @@ export function reviewSession(options: ReviewSessionOptions): ReviewSession {
           );
         }
         // The approval count and the status callout's warnings change with it.
+        return PAGE;
+      }
+
+      case DECLINE_ACTION: {
+        const result = await declineRequirement({
+          store: ws.store,
+          planId,
+          requirement: key,
+          reason: field('reason'),
+          revision: intent.version,
+          actor: intent.actor,
+          agent: false,
+        });
+        if (!result.ok) {
+          return refuse(
+            result.code,
+            result.code === 'STALE'
+              ? 'This requirement changed since the page was loaded; reload and read it again before declining.'
+              : result.message,
+          );
+        }
         return PAGE;
       }
 

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { YojanaError } from '@cntxt-labs/yojana-core';
 import { MarkdownParser } from '@cntxt-labs/yojana-markdown';
 import { MemoryBaseStore, MemoryStore } from '@cntxt-labs/yojana-store';
-import { comment } from '../comment.ts';
+import { comment, removeComment } from '../comment.ts';
 import { ingest } from '../ingest.ts';
 import { projectReview } from '../project.ts';
 
@@ -32,13 +32,14 @@ async function setup() {
     files = [{ source: 'plans/r.md', text }];
     await ingest({ store, parser, bases, files, actor: 'me' });
   };
-  const content = async () =>
+  const content = async (you?: string) =>
     projectReview({
       events: await store.events(),
       planId: 'plan/r',
       checks: [],
       now: 0,
       mode: 'read',
+      you,
     });
   return { store, edit, content };
 }
@@ -129,3 +130,67 @@ async function setupContent(store: MemoryStore) {
     mode: 'read',
   })?.threads;
 }
+
+describe('removing a comment', () => {
+  const note = (store: MemoryStore, author: string, body: string, replyTo?: string) =>
+    comment({
+      store,
+      planId: 'plan/r',
+      requirement: 'primer',
+      body,
+      author,
+      quote: 'stay short',
+      replyTo,
+    });
+  const remove = (store: MemoryStore, id: string, actor: string) =>
+    removeComment({ store, planId: 'plan/r', id, actor });
+
+  test('only its author removes a comment, person or agent', async () => {
+    const { store } = await setup();
+    const mine = await note(store, 'me', 'Mine');
+    const agents = await note(store, 'claude', 'From an agent');
+    if (!mine.ok || !agents.ok) throw new YojanaError('TEST_FIXTURE', 'comment');
+
+    expect(await remove(store, mine.annotation.id, 'claude')).toMatchObject({ code: 'NOT_YOURS' });
+    expect(await remove(store, agents.annotation.id, 'me')).toMatchObject({ code: 'NOT_YOURS' });
+    expect(await remove(store, agents.annotation.id, 'claude')).toMatchObject({ ok: true });
+    expect(await remove(store, mine.annotation.id, 'me')).toMatchObject({ ok: true });
+    expect(await remove(store, mine.annotation.id, 'me')).toMatchObject({
+      code: 'COMMENT_NOT_FOUND',
+    });
+    expect(await remove(store, 'n_nope', 'me')).toMatchObject({ code: 'COMMENT_NOT_FOUND' });
+  });
+
+  test('the page offers Remove on your own comments, and drops what was removed', async () => {
+    const { store, content } = await setup();
+    const root = await note(store, 'me', 'Root');
+    if (!root.ok) throw new YojanaError('TEST_FIXTURE', 'comment');
+    const reply = await note(store, 'ana', 'A reply', root.annotation.id);
+    if (!reply.ok) throw new YojanaError('TEST_FIXTURE', 'reply');
+
+    const before = await content('me');
+    expect(before?.threads[0]).toMatchObject({ removable: true, mark: '1', quote: 'stay short' });
+    expect(before?.threads[0]?.replies[0]).toEqual({
+      id: reply.annotation.id,
+      author: 'ana',
+      when: 'just now',
+      body: 'A reply',
+    });
+    // A saved page (no one looking) offers nothing to remove.
+    expect((await content())?.threads[0]?.removable).toBeUndefined();
+
+    // A removed comment with a reply stays, as removed, for the reply; its highlight goes.
+    await remove(store, root.annotation.id, 'me');
+    const after = await content('me');
+    expect(after?.threads[0]).toMatchObject({ removed: true, body: '' });
+    expect(after?.threads[0]?.quote).toBeUndefined();
+    expect(after?.threads[0]?.mark).toBeUndefined();
+    expect(after?.threads[0]?.removable).toBeUndefined();
+    expect(after?.sections.find((x) => x.id === 'primer')?.body).not.toHaveProperty('marks');
+    expect(after?.activity[0]?.what).toBe('removed a comment on “primer”');
+
+    // Once the reply goes too, the thread is gone.
+    await remove(store, reply.annotation.id, 'ana');
+    expect((await content('me'))?.threads).toEqual([]);
+  });
+});

@@ -1,0 +1,5 @@
+<form class="inline" data-patra-form="decline-section">
+  <label><span class="label">Why decline it? What would it take to approve?</span><input name="reason" value="{{values.reason}}" required></label>
+  {{#error}}<p class="error" role="alert">{{error}}</p>{{/error}}
+  <div class="actions"><button type="submit" class="primary">Decline</button><button type="button" data-patra-cancel>Cancel</button></div>
+</form>

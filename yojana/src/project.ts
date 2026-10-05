@@ -7,6 +7,7 @@ import {
   findBaseConflicts,
   foldLog,
   isAnnotationOutdated,
+  isAnnotationRemoved,
   openAnomalies,
   type Plan,
   type PlanState,
@@ -82,6 +83,8 @@ export interface ReviewCallout {
 }
 
 interface Reply {
+  readonly id?: string;
+  readonly removable?: boolean;
   readonly author: string;
   readonly agent?: boolean;
   readonly when: string;
@@ -94,6 +97,8 @@ export interface ReviewThread extends Reply {
   readonly mark?: string;
   readonly quote?: string;
   readonly outdated: boolean;
+  /** Removed, but kept on the page for its replies. */
+  readonly removed?: boolean;
   readonly replies: readonly Reply[];
 }
 
@@ -159,7 +164,8 @@ export interface ProjectOptions {
 
 /** Recent events shown in the activity rail. */
 export const ACTIVITY_LIMIT = 12;
-const DEFAULT_AGENTS: readonly string[] = ['claude', 'opencode'];
+/** Actors that are agents unless told otherwise: what the plugins record their actions as. */
+export const AGENT_ACTORS: readonly string[] = ['claude', 'opencode'];
 
 /** The status a plan usually moves to next, offered on the page when nothing is proposed. */
 const NEXT_STATUS: Readonly<Partial<Record<PlanStatus, PlanStatus>>> = {
@@ -171,6 +177,8 @@ const NEXT_STATUS: Readonly<Partial<Record<PlanStatus, PlanStatus>>> = {
 /** The key of a callout for a waiting proposal; `next` is the plain offer of the next status. */
 export const PROPOSAL_CALLOUT = 'proposal:';
 export const NEXT_CALLOUT = 'next';
+/** patra's action for declining a section; its `decline` is for callouts. */
+export const DECLINE_ACTION = 'decline-section';
 const MINUTE_MS = 60_000;
 const MINUTES_PER_HOUR = 60;
 const MINUTES_PER_DAY = 1440;
@@ -229,6 +237,7 @@ function numberMarks(state: ReturnType<typeof foldLog>, plan: PlanState): Map<st
         (a) =>
           a.requirement === requirement.id &&
           a.replyTo === undefined &&
+          !isAnnotationRemoved(plan, a.id) &&
           a.quote !== undefined &&
           a.quote !== '' &&
           !isAnnotationOutdated(state, plan.id, a),
@@ -251,7 +260,7 @@ export function projectReview(options: ProjectOptions): ReviewDocument | undefin
   const plan = state.plans.get(options.planId);
   if (plan === undefined) return undefined;
   const { now, report, checks } = options;
-  const agents = options.agents ?? DEFAULT_AGENTS;
+  const agents = options.agents ?? AGENT_ACTORS;
   const isAgent = (actor: string) => agents.includes(actor);
   const when = (at: number | undefined) => (at === undefined ? '' : ago(at, now));
 
@@ -272,7 +281,7 @@ export function projectReview(options: ProjectOptions): ReviewDocument | undefin
     projectSection({ state, plan, requirement: r, report, checks, openChanges, marks }),
   );
 
-  const threads = projectThreads(plan, state, marks, atOf, isAgent, when);
+  const threads = projectThreads(plan, state, marks, atOf, isAgent, when, options.you);
 
   const changes: ReviewChange[] = openChanges.map((c) => {
     const applies = findBaseConflicts(heads, c.change.deltas).length === 0;
@@ -359,9 +368,13 @@ export function projectReview(options: ProjectOptions): ReviewDocument | undefin
   ];
 
   // What to weigh before changing the plan's status: warnings, never a gate.
-  const liveThreads = threads.filter((t) => !t.outdated).length;
+  const liveThreads = threads.filter((t) => !t.outdated && t.removed !== true).length;
   const unapproved = count('unapproved');
+  const declined = count('declined');
   const weigh: Chip[] = [
+    ...(declined > 0
+      ? [{ label: `${plural(declined, 'requirement')} declined`, intent: 'danger' as const }]
+      : []),
     ...(unapproved > 0
       ? [
           {
@@ -442,21 +455,25 @@ function projectSection(input: {
   const delta = touching[0]?.change.deltas.find((d) => deltaTarget(d) === r.id);
   const contested = plan.contested.has(r.id);
   const threads = plan.annotations.filter(
-    (a) => a.requirement === r.id && a.replyTo === undefined,
+    (a) => a.requirement === r.id && a.replyTo === undefined && !isAnnotationRemoved(plan, a.id),
   ).length;
 
   const approval = approvalOf(plan, r.id);
+  const approved = approval?.verdict === 'approved' && !approval.stale;
+  const declined = approval?.verdict === 'declined' && !approval.stale;
   const tags: string[] = [];
   if (alignment?.mismatch === 'claims-hold-work-open') tags.push('close');
   if (health === 'danger') tags.push('violated');
+  if (declined) tags.push('declined');
   if (tags.length > 0 || touching.length > 0 || contested) tags.push('attention');
   // Not yet approved is for the person's own review pass, not something needing attention.
-  if (approval === undefined || approval.stale) tags.push('unapproved');
+  if (!approved) tags.push('unapproved');
 
   const note = [
     alignment?.mismatch === 'claims-hold-work-open' ? 'close?' : '',
     alignment?.mismatch === 'work-closed-claims-violated' ? 'reopen?' : '',
     contested ? 'contested' : '',
+    declined ? 'declined' : '',
     touching.length > 0 ? plural(touching.length, 'change') : '',
     threads > 0 ? plural(threads, 'thread') : '',
   ]
@@ -479,13 +496,7 @@ function projectSection(input: {
               intent: health,
             },
           ]),
-    ...(approval === undefined
-      ? []
-      : [
-          approval.stale
-            ? { label: `approved by ${approval.by}, changed since`, intent: 'warning' as const }
-            : { label: `approved by ${approval.by}`, intent: 'success' as const },
-        ]),
+    ...(approval === undefined ? [] : [verdictChip(approval)]),
   ];
 
   // Decisions not yet applied speak for their items, so the mismatch flags leave those out.
@@ -596,13 +607,17 @@ function projectSection(input: {
         }),
     evidence,
     ...(flags.length > 0 ? { flags } : {}),
-    ...(approval === undefined || approval.stale
-      ? {
+    ...(approved
+      ? {}
+      : {
           buttons: [
-            { action: 'approve', label: approval === undefined ? 'Approve' : 'Approve again' },
+            {
+              action: 'approve',
+              label: approval?.verdict === 'approved' ? 'Approve again' : 'Approve',
+            },
+            ...(declined ? [] : [{ action: DECLINE_ACTION, label: 'Decline' }]),
           ],
-        }
-      : {}),
+        }),
     editable: { title: r.title, text: r.text },
   };
 }
@@ -618,7 +633,11 @@ function projectThreads(
   atOf: ReadonlyMap<string, number>,
   isAgent: (actor: string) => boolean,
   when: (at: number | undefined) => string,
+  you: string | undefined,
 ): ReviewThread[] {
+  const removed = (a: Annotation) => isAnnotationRemoved(plan, a.id);
+  // Only its author removes a comment, at a live page; a saved page offers nothing.
+  const removable = (a: Annotation) => you !== undefined && !removed(a) && a.author === you;
   const byId = new Map(plan.annotations.map((a) => [a.id, a]));
   const rootOf = (a: Annotation): Annotation => {
     let current = a;
@@ -632,24 +651,47 @@ function projectThreads(
     return current;
   };
   const reply = (a: Annotation): Reply => ({
+    id: a.id,
+    ...(removable(a) ? { removable: true } : {}),
     author: a.author,
     ...(isAgent(a.author) ? { agent: true } : {}),
     when: when(atOf.get(a.id)),
     body: a.body,
   });
   const roots = plan.annotations.filter((a) => rootOf(a) === a);
-  return roots.map((a) => {
+  return roots.flatMap((a) => {
+    const replies = plan.annotations.filter((b) => b !== a && rootOf(b) === a && !removed(b));
+    // A removed comment stays only to hold its replies.
+    if (removed(a) && replies.length === 0) return [];
     const mark = marks.get(a.id);
-    return {
-      id: a.id,
-      section: a.requirement,
-      ...(mark === undefined ? {} : { mark }),
-      ...(a.quote === undefined || a.quote === '' ? {} : { quote: a.quote }),
-      ...reply(a),
-      outdated: isAnnotationOutdated(state, plan.id, a),
-      replies: plan.annotations.filter((b) => b !== a && rootOf(b) === a).map(reply),
-    };
+    return [
+      {
+        ...reply(a),
+        id: a.id,
+        section: a.requirement,
+        ...(mark === undefined ? {} : { mark }),
+        ...(a.quote === undefined || a.quote === '' || removed(a) ? {} : { quote: a.quote }),
+        ...(removed(a) ? { body: '', removed: true } : {}),
+        outdated: isAnnotationOutdated(state, plan.id, a),
+        replies: replies.map(reply),
+      },
+    ];
   });
+}
+
+/** The verdict on a requirement as a chip: who, and whether it still speaks for the text. */
+function verdictChip(approval: {
+  readonly verdict: 'approved' | 'declined';
+  readonly by: string;
+  readonly reason?: string | undefined;
+  readonly stale: boolean;
+}): Chip {
+  if (approval.stale) {
+    return { label: `${approval.verdict} by ${approval.by}, changed since`, intent: 'warning' };
+  }
+  return approval.verdict === 'approved'
+    ? { label: `approved by ${approval.by}`, intent: 'success' }
+    : { label: `declined by ${approval.by}: ${approval.reason ?? ''}`, intent: 'danger' };
 }
 
 /** What happened, newest first, as sentences a person reads. */
@@ -703,6 +745,17 @@ function projectActivity(
       }
       case 'requirement-approved':
         return event.planId === plan.id ? `approved “${titleOf(event.requirement)}”` : undefined;
+      case 'requirement-declined':
+        return event.planId === plan.id
+          ? `declined “${titleOf(event.requirement)}”: ${event.reason}`
+          : undefined;
+      case 'annotation-removed': {
+        if (event.planId !== plan.id) return undefined;
+        const gone = plan.annotations.find((a) => a.id === event.annotationId);
+        return gone === undefined
+          ? undefined
+          : `removed a ${gone.replyTo === undefined ? 'comment' : 'reply'} on “${titleOf(gone.requirement)}”`;
+      }
       case 'annotation-added':
         if (event.planId !== plan.id) return undefined;
         return event.annotation.replyTo === undefined

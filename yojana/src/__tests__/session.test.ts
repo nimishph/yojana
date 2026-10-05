@@ -172,6 +172,43 @@ describe('review session', () => {
     });
   });
 
+  test('remove takes off a reply (by item) or the thread itself; only for their author', async () => {
+    const thread = (await session.load('review-document', 'plan/s'))?.threads[0];
+    const replyId = thread?.replies[0]?.id ?? '';
+    const remove = (key: string, item = '', actor = 'me') =>
+      session.handle({
+        ...intent('remove', key, item === '' ? {} : { item }),
+        target: { part: 'thread', key },
+        actor,
+      });
+    expect(await remove(thread?.id ?? '', replyId, 'ana')).toMatchObject({ code: 'NOT_YOURS' });
+    expect(await remove(thread?.id ?? '', replyId)).toEqual({ ok: true, update: { kind: 'page' } });
+    expect((await session.load('review-document', 'plan/s'))?.threads[0]?.replies).toEqual([]);
+    expect((await remove(thread?.id ?? '')).ok).toBe(true);
+    expect((await session.load('review-document', 'plan/s'))?.threads).toEqual([]);
+  });
+
+  test('decline-section declines a requirement with a reason, checked against the revision', async () => {
+    const section = (await session.load('review-document', 'plan/s'))?.sections[0];
+    expect(section?.buttons).toContainEqual({ action: 'decline-section', label: 'Decline' });
+    expect(
+      await session.handle(intent('decline-section', 'first', { reason: '' }, section?.version)),
+    ).toMatchObject({ ok: false, code: 'REASON_REQUIRED' });
+    expect(
+      await session.handle(intent('decline-section', 'first', { reason: 'x' }, 'r_old')),
+    ).toMatchObject({ ok: false, code: 'STALE' });
+    expect(
+      await session.handle(
+        intent('decline-section', 'first', { reason: 'Say who reads it.' }, section?.version),
+      ),
+    ).toEqual({ ok: true, update: { kind: 'page' } });
+    const after = (await session.load('review-document', 'plan/s'))?.sections[0];
+    expect(after?.properties).toContainEqual({
+      label: 'declined by me: Say who reads it.',
+      intent: 'danger',
+    });
+  });
+
   test('suggest opens a change; reject needs a reason, then settles the change file', async () => {
     const first = await section('first');
     expect(

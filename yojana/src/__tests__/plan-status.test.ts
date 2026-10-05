@@ -10,6 +10,7 @@ import { MemoryBaseStore, MemoryStore } from '@cntxt-labs/yojana-store';
 import { ingest } from '../ingest.ts';
 import {
   approveRequirement,
+  declineRequirement,
   declineStatus,
   finalizeStatus,
   proposeStatus,
@@ -242,9 +243,66 @@ describe('approvals', () => {
       label: 'approved by me, changed since',
       intent: 'warning',
     });
-    expect(doc?.sections[0]?.buttons).toEqual([{ action: 'approve', label: 'Approve again' }]);
+    expect(doc?.sections[0]?.buttons).toEqual([
+      { action: 'approve', label: 'Approve again' },
+      { action: 'decline-section', label: 'Decline' },
+    ]);
     expect(doc?.document.metrics.at(-1)).toEqual({ label: '0/2 approved' });
     expect((await state()).plans.get('plan/p')?.approvals.size).toBe(1);
+  });
+});
+
+describe('declining a requirement', () => {
+  test('a person declines with a reason; approving later replaces it', async () => {
+    const { store, state } = await setup();
+    const decline = (reason: string, agent = false) =>
+      declineRequirement({
+        store,
+        planId: 'plan/p',
+        requirement: 'shipped',
+        reason,
+        actor: agent ? 'claude' : 'me',
+        agent,
+      });
+    expect(await decline('vague', true)).toMatchObject({ code: 'PERSON_ONLY' });
+    expect(await decline('  ')).toMatchObject({ code: 'REASON_REQUIRED' });
+    expect(await decline('say which release')).toMatchObject({ ok: true, already: false });
+    expect(await decline('say which release')).toMatchObject({ ok: true, already: true });
+
+    const project = async () =>
+      projectReview({
+        events: await store.events(),
+        planId: 'plan/p',
+        checks: [],
+        now: Date.now(),
+        mode: 'read',
+      });
+    const declined = await project();
+    const section = declined?.sections.find((x) => x.id === 'shipped');
+    expect(section?.properties).toContainEqual({
+      label: 'declined by me: say which release',
+      intent: 'danger',
+    });
+    expect(section?.tags).toEqual(['declined', 'attention', 'unapproved']);
+    expect(section?.buttons).toEqual([{ action: 'approve', label: 'Approve' }]);
+    expect(declined?.callouts[0]?.notes?.[0]).toEqual({
+      label: '1 requirement declined',
+      intent: 'danger',
+    });
+    expect(declined?.activity[0]?.what).toBe('declined “shipped”: say which release');
+
+    // Approving after a decline is a new verdict, not "already approved".
+    expect(
+      await approveRequirement({
+        store,
+        planId: 'plan/p',
+        requirement: 'shipped',
+        actor: 'me',
+        agent: false,
+      }),
+    ).toMatchObject({ ok: true, already: false });
+    expect((await state()).plans.get('plan/p')?.approvals.get('shipped')?.verdict).toBe('approved');
+    expect((await project())?.sections.find((x) => x.id === 'shipped')?.buttons).toBeUndefined();
   });
 });
 

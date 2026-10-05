@@ -24,10 +24,13 @@ plan still matches the code.
   running `yojana ingest`, which records your edit as a proposal). The plan stays where it is until
   the person accepts it on the review page or with `yojana decisions --finalize <id>`, or declines
   it, which puts the file's status line back. You cannot finalize, decline, or pass `--final`.
-- **Approvals.** The person approves requirements one by one, on the page or with `yojana approve`;
-  an approval is for the revision they read and goes stale when it changes. Approving is theirs
-  alone, and approvals never block a status change: the page lists what is unapproved, open
-  threads and open changes as things to weigh.
+- **Approvals.** The person approves or declines requirements one by one, on the page or with
+  `yojana approve` / `yojana decline --reason "…"`; a verdict is for the revision they read and
+  goes stale when it changes. Both are theirs alone, and neither blocks a status change: the page
+  lists what is unapproved or declined, open threads and open changes as things to weigh. When a
+  requirement is declined, read the reason and suggest a change that answers it.
+- **Comments.** Only a comment's author removes it (`yojana remove-comment <plan> <id>`), so you
+  can take back your own notes but never the person's.
 - **Work items.** Never close or reopen a bead yourself because a plan says the work is done.
   Propose it with `yojana decide` (without `--final`). The person finalizes it on the review page
   or with `yojana decisions --finalize`. Only then does `yojana decisions --apply` run `bd close`.
@@ -89,6 +92,7 @@ expect: false
 | open a suggested change | write `changes/<id>.md`, then `yojana change open changes/<id>.md` |
 | list, accept, reject changes | `yojana changes`, `yojana archive <id>`, `yojana abandon <id> --reason "…"` |
 | comment on a requirement | `yojana comment <plan> <req> "text" [--quote "span"] [--reply <id>]` |
+| take back your own comment | `yojana remove-comment <plan> <id>` (ids are in `yojana review <plan> --content`) |
 | propose a decision on a bead | `yojana decide <plan> <req> <bead> close\|reopen --reason "…"` |
 | propose moving a plan (draft → accepted, …) | `yojana propose-status <plan> <status> --reason "…"` |
 | what waits on the person (bead decisions, status proposals) | `yojana decisions [--all]` |

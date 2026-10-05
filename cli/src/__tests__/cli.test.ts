@@ -173,6 +173,31 @@ describe('yojana CLI, start to finish', () => {
     expect(readFileSync(join(root, '.yojana', '.gitignore'), 'utf8')).toContain('review/');
   });
 
+  test('remove-comment takes off your own comment; decline needs a reason and a person', async () => {
+    const added = await yojana('comment', 'plan/demo', 'readme', 'Drop this.', '--json');
+    const id = JSON.parse(added.out).annotation.id;
+    process.env.YOJANA_ACTOR = 'someone-else';
+    expect((await yojana('remove-comment', 'plan/demo', id)).out).toContain('NOT_YOURS');
+    process.env.YOJANA_ACTOR = 'tester';
+    const removed = await yojana('remove-comment', 'plan/demo', id);
+    expect(removed.code).toBe(0);
+    expect(removed.out).toContain(`removed ${id} from plan/demo readme`);
+    expect((await yojana('remove-comment', 'plan/demo')).code).toBe(2);
+
+    expect((await yojana('decline', 'plan/demo', 'readme')).code).toBe(2);
+    const declined = await yojana('decline', 'plan/demo', 'readme', '--reason', 'Say which docs.');
+    expect(declined.code).toBe(0);
+    expect(declined.out).toMatch(/plan\/demo readme {2}declined at r_/);
+    // An agent: YOJANA_AGENT set and no YOJANA_ACTOR naming a person.
+    delete process.env.YOJANA_ACTOR;
+    process.env.YOJANA_AGENT = 'claude';
+    expect((await yojana('decline', 'plan/demo', 'readme', '--reason', 'x')).out).toContain(
+      'PERSON_ONLY',
+    );
+    delete process.env.YOJANA_AGENT;
+    process.env.YOJANA_ACTOR = 'tester';
+  });
+
   test('review --content prints the page content as JSON and writes no file', async () => {
     rmSync(join(root, '.yojana', 'review'), { recursive: true, force: true });
     expect((await yojana('comment', 'plan/demo', 'readme', 'Link the docs site too.')).code).toBe(

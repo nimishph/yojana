@@ -1,0 +1,91 @@
+/*
+ * patra default theme. Templates use only these tokens, by meaning, never raw palette steps.
+ * Intents follow auix's vocabulary (neutral, primary, success, warning, danger), so a theme that
+ * maps them onto auix's palette (--sd-*) can replace this one without template changes.
+ *
+ * Three states, like every patra page: light by default; dark when the viewer prefers it and
+ * has not chosen light; dark when data-theme="dark" is set. Colour tokens are defined in all
+ * three; fonts and shapes only once.
+ */
+
+:root {
+  /* Surfaces */
+  --surface-page: #f6f7f9;
+  --surface-raised: #ffffff;
+  --surface-sunken: #eef1f5;
+  /* Text and lines */
+  --text: #17202b;
+  --text-muted: #5b6876;
+  --border: #d8dee5;
+  /* Intents (auix names) */
+  --intent-neutral: #4b5765;
+  --intent-neutral-soft: #eceff3;
+  --intent-primary: #2d4f9c;
+  --intent-primary-soft: #e6ecf8;
+  --intent-success: #26734a;
+  --intent-success-soft: #e3f2ea;
+  --intent-warning: #965a0e;
+  --intent-warning-soft: #f6ecdc;
+  --intent-danger: #b03636;
+  --intent-danger-soft: #f8e5e5;
+  /* Reading aids */
+  --mark: #fdf0a6;
+  --diff-insert: #d9f0e1;
+  --diff-delete: #f7dcdc;
+  /* Type and shape */
+  --font-reading: "Literata", Georgia, "Times New Roman", serif;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-pill: 999px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface-page: #11151b;
+    --surface-raised: #181e27;
+    --surface-sunken: #141a22;
+    --text: #e2e7ed;
+    --text-muted: #97a4b2;
+    --border: #2a333f;
+    --intent-neutral: #b3bdc9;
+    --intent-neutral-soft: #222a35;
+    --intent-primary: #8ea8ea;
+    --intent-primary-soft: #1f2a3f;
+    --intent-success: #6cc28f;
+    --intent-success-soft: #17302a;
+    --intent-warning: #e2a35f;
+    --intent-warning-soft: #3a2d1b;
+    --intent-danger: #ec8a8a;
+    --intent-danger-soft: #3a1f22;
+    --mark: #4f4415;
+    --diff-insert: #1d3a2a;
+    --diff-delete: #432226;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --surface-page: #11151b;
+  --surface-raised: #181e27;
+  --surface-sunken: #141a22;
+  --text: #e2e7ed;
+  --text-muted: #97a4b2;
+  --border: #2a333f;
+  --intent-neutral: #b3bdc9;
+  --intent-neutral-soft: #222a35;
+  --intent-primary: #8ea8ea;
+  --intent-primary-soft: #1f2a3f;
+  --intent-success: #6cc28f;
+  --intent-success-soft: #17302a;
+  --intent-warning: #e2a35f;
+  --intent-warning-soft: #3a2d1b;
+  --intent-danger: #ec8a8a;
+  --intent-danger-soft: #3a1f22;
+  --mark: #4f4415;
+  --diff-insert: #1d3a2a;
+  --diff-delete: #432226;
+  color-scheme: dark;
+}

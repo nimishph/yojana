@@ -1,0 +1,8 @@
+<form class="inline" data-patra-form="decide">
+  <input type="hidden" name="item" value="{{values.item}}">
+  <input type="hidden" name="decision" value="{{values.decision}}">
+  <p>Record a decision: <b>{{values.decision}}</b> {{values.item}}</p>
+  <label><span class="label">Reason</span><input name="reason" value="{{values.reason}}" required></label>
+  {{#error}}<p class="error" role="alert">{{error}}</p>{{/error}}
+  <div class="actions"><button type="submit" class="primary">Record decision</button><button type="button" data-patra-cancel>Cancel</button></div>
+</form>

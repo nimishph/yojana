@@ -1,0 +1,6 @@
+<form class="inline" data-patra-form="decline">
+  <p>{{text}}</p>
+  <label><span class="label">Why not yet</span><input name="reason" value="{{values.reason}}" required></label>
+  {{#error}}<p class="error" role="alert">{{error}}</p>{{/error}}
+  <div class="actions"><button type="submit">Decline</button><button type="button" data-patra-cancel>Cancel</button></div>
+</form>

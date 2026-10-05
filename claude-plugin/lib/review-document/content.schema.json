@@ -1,0 +1,470 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cntxt-labs/patra/templates/review-document/0.1.0/content.schema.json",
+  "title": "review-document content",
+  "type": "object",
+  "required": ["document", "sections"],
+  "additionalProperties": false,
+  "$defs": {
+    "intent": {
+      "enum": ["neutral", "primary", "success", "warning", "danger"]
+    },
+    "formatted": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "required": ["kind", "source"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "markdown"
+            },
+            "source": {
+              "type": "string"
+            },
+            "marks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["text", "id"],
+                "additionalProperties": false,
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "before", "after"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "diff"
+            },
+            "before": {
+              "type": "string"
+            },
+            "after": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "chip": {
+      "type": "object",
+      "required": ["label"],
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "intent": {
+          "$ref": "#/$defs/intent"
+        }
+      }
+    },
+    "button": {
+      "type": "object",
+      "required": ["action", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "item": {
+          "type": "string"
+        },
+        "primary": {
+          "type": "boolean"
+        },
+        "decision": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "properties": {
+    "document": {
+      "type": "object",
+      "required": ["id", "title", "mode"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "crumbs": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/chip"
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label"],
+            "additionalProperties": false,
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "intent": {
+                "$ref": "#/$defs/intent"
+              },
+              "meter": {
+                "type": "object",
+                "required": ["value", "max"],
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "max": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "mode": {
+          "enum": ["read", "suggest", "edit"]
+        },
+        "intro": {
+          "$ref": "#/$defs/formatted"
+        },
+        "banner": {
+          "$ref": "#/$defs/chip"
+        },
+        "source": {
+          "type": "string"
+        },
+        "freshness": {
+          "type": "string"
+        }
+      }
+    },
+    "filters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "count"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "callouts": {
+      "type": "array",
+      "description": "Notes on the whole document that ask for a decision, shown above the sections, each with its buttons and the things to weigh first.",
+      "items": {
+        "type": "object",
+        "required": ["id", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "intent": {
+            "$ref": "#/$defs/intent"
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/chip"
+            }
+          },
+          "buttons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/button"
+            }
+          }
+        }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "body"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "health": {
+            "$ref": "#/$defs/intent"
+          },
+          "note": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/chip"
+            }
+          },
+          "body": {
+            "$ref": "#/$defs/formatted"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/chip"
+            }
+          },
+          "flags": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["text"],
+              "additionalProperties": false,
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "intent": {
+                  "$ref": "#/$defs/intent"
+                },
+                "buttons": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/button"
+                  }
+                }
+              }
+            }
+          },
+          "buttons": {
+            "type": "array",
+            "description": "Actions on the section shown beside edit, suggest and comment (e.g. approve).",
+            "items": {
+              "$ref": "#/$defs/button"
+            }
+          },
+          "editable": {
+            "type": "object",
+            "description": "The section's source as the person edits it (e.g. Markdown), for the edit and suggest forms.",
+            "required": ["title", "text"],
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter ids this section matches (see filters)."
+          },
+          "proposed": {
+            "$ref": "#/$defs/formatted",
+            "description": "An open change to this section, usually a diff, shown in suggest mode."
+          }
+        }
+      }
+    },
+    "threads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "section", "author", "body"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          },
+          "mark": {
+            "type": "string",
+            "description": "Number shown on the quote's highlight and the thread."
+          },
+          "quote": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "boolean"
+          },
+          "when": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "outdated": {
+            "type": "boolean"
+          },
+          "replies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["author", "body"],
+              "additionalProperties": false,
+              "properties": {
+                "author": {
+                  "type": "string"
+                },
+                "agent": {
+                  "type": "boolean"
+                },
+                "when": {
+                  "type": "string"
+                },
+                "body": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string",
+                  "description": "The reply's id, sent as the item when it is removed."
+                },
+                "removable": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "removable": {
+            "type": "boolean",
+            "description": "The person looking may remove this comment: a Remove button shows."
+          },
+          "removed": {
+            "type": "boolean",
+            "description": "The comment was removed but has replies: it shows as removed, its replies stay."
+          }
+        }
+      }
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "diffs"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "when": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/$defs/chip"
+          },
+          "why": {
+            "type": "string"
+          },
+          "applies": {
+            "type": "boolean",
+            "description": "False when what it edits has moved; then it can only be rejected."
+          },
+          "diffs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["section", "label", "diff"],
+              "additionalProperties": false,
+              "properties": {
+                "section": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "diff": {
+                  "$ref": "#/$defs/formatted"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "activity": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "who", "what"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "who": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": ["person", "agent", "you"]
+          },
+          "what": {
+            "type": "string"
+          },
+          "when": {
+            "type": "string"
+          },
+          "where": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

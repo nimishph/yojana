@@ -1,0 +1,705 @@
+/*
+ * review-document layout. Uses only theme tokens (see template.json "tokens").
+ * Three panes on wide screens: outline, document, review rail. On narrow screens the outline and
+ * rail stack below the document. Without the runtime (a static export) controls marked
+ * .live-only are hidden, .saved-only shown, and every rail panel shows; with it, <html
+ * data-patra-live> is set.
+ */
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--surface-page);
+  color: var(--text);
+  font: 400 15px / 1.6 var(--font-ui);
+}
+button {
+  font: 500 13px var(--font-ui);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 4px 11px;
+  cursor: pointer;
+}
+button:hover {
+  border-color: var(--intent-primary);
+}
+button.primary {
+  background: var(--intent-primary);
+  border-color: var(--intent-primary);
+  color: var(--surface-raised);
+}
+button.link {
+  border: 0;
+  background: none;
+  padding: 0 4px;
+  color: var(--intent-primary);
+  font-size: 12.5px;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--intent-primary);
+  outline-offset: 2px;
+}
+a {
+  color: var(--intent-primary);
+}
+code {
+  font: 0.88em var(--font-mono);
+  background: var(--intent-primary-soft);
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+pre {
+  margin: 0;
+  overflow-x: auto;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  font: 13px / 1.5 var(--font-mono);
+}
+pre code {
+  background: none;
+  padding: 0;
+}
+mark {
+  background: var(--mark);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+ins {
+  background: var(--diff-insert);
+  text-decoration: none;
+  border-radius: 2px;
+}
+del {
+  background: var(--diff-delete);
+  color: var(--text-muted);
+  border-radius: 2px;
+}
+.muted,
+.small {
+  color: var(--text-muted);
+}
+.small {
+  font-size: 12.5px;
+}
+.label {
+  font: 500 11px var(--font-mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 12px / 1.7 var(--font-mono);
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  white-space: nowrap;
+}
+.chip.success {
+  color: var(--intent-success);
+  background: var(--intent-success-soft);
+  border-color: transparent;
+}
+.chip.danger {
+  color: var(--intent-danger);
+  background: var(--intent-danger-soft);
+  border-color: transparent;
+}
+.chip.warning {
+  color: var(--intent-warning);
+  background: var(--intent-warning-soft);
+  border-color: transparent;
+}
+.chip.primary {
+  color: var(--intent-primary);
+  background: var(--intent-primary-soft);
+  border-color: transparent;
+}
+.chip.neutral {
+  color: var(--intent-neutral);
+  background: var(--intent-neutral-soft);
+  border-color: transparent;
+}
+meter {
+  width: 80px;
+  height: 6px;
+}
+
+.rd-bar {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 10px 16px;
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border);
+}
+.rd-heading {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.rd-crumbs {
+  font: 12px var(--font-mono);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.rd-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.rd-title h1 {
+  margin: 0;
+  font: 600 18px / 1.3 var(--font-reading);
+  text-wrap: balance;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.seg {
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.seg button {
+  border: 0;
+  border-radius: 0;
+  padding: 6px 12px;
+}
+.seg button + button {
+  border-left: 1px solid var(--border);
+}
+.rd[data-mode="read"] [data-patra-mode="read"],
+.rd[data-mode="suggest"] [data-patra-mode="suggest"],
+.rd[data-mode="edit"] [data-patra-mode="edit"] {
+  background: var(--intent-primary);
+  color: var(--surface-raised);
+}
+
+.rd-body {
+  display: grid;
+  /* 1:2:1, a quarter, a half and a quarter of the width; minmax(0, ...) lets a column shrink
+     below its content's width, so a long line wraps instead of widening it. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr);
+  min-height: calc(100vh - 60px);
+}
+.rd-outline {
+  background: var(--surface-sunken);
+  border-right: 1px solid var(--border);
+  padding: 14px 12px;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+.rd-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.filter {
+  font: 500 11.5px var(--font-mono);
+  border-radius: var(--radius-pill);
+  padding: 2px 9px;
+}
+.filter[data-active="true"],
+.filter[aria-pressed="true"] {
+  color: var(--intent-primary);
+  border-color: var(--intent-primary);
+  background: var(--intent-primary-soft);
+}
+.rd-toc {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.rd-toc a {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 1px 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 13px;
+}
+.rd-toc a:hover {
+  background: var(--surface-raised);
+}
+.toc-title {
+  overflow-wrap: anywhere;
+}
+.rd-toc small {
+  grid-column: 2;
+  font: 11px var(--font-mono);
+  color: var(--text-muted);
+}
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--border);
+}
+.dot.success {
+  background: var(--intent-success);
+}
+.dot.danger {
+  background: var(--intent-danger);
+}
+.dot.warning {
+  background: var(--intent-warning);
+}
+.dot.primary {
+  background: var(--intent-primary);
+}
+.rd-source {
+  display: grid;
+  gap: 3px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  font: 12px / 1.5 var(--font-mono);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.rd-page {
+  background: var(--surface-raised);
+  padding: 26px clamp(16px, 3vw, 40px) 64px;
+  display: grid;
+  align-content: start;
+  gap: 22px;
+  min-width: 0;
+}
+.rd-intro {
+  font: 400 16.5px / 1.7 var(--font-reading);
+}
+.banner {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--intent-warning-soft);
+}
+.banner.danger {
+  background: var(--intent-danger-soft);
+}
+.banner.success {
+  background: var(--intent-success-soft);
+}
+.sec {
+  display: grid;
+  gap: 10px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  scroll-margin-top: 80px;
+  min-width: 0;
+}
+.sec-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+}
+.sec-head h2 {
+  margin: 0;
+  font: 600 20px / 1.3 var(--font-reading);
+  text-wrap: balance;
+}
+.anchor {
+  font: 12px var(--font-mono);
+  text-decoration: none;
+}
+.props,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.sec-body {
+  font: 400 16px / 1.72 var(--font-reading);
+}
+.sec-body p,
+.sec-body ul {
+  margin: 0 0 10px;
+}
+.sec-body h4 {
+  margin: 12px 0 4px;
+  font: 600 15px var(--font-ui);
+}
+.flag {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--intent-primary-soft);
+  font-size: 13.5px;
+}
+.flag.danger {
+  background: var(--intent-danger-soft);
+}
+.flag.warning {
+  background: var(--intent-warning-soft);
+}
+.callout {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--intent-primary);
+  border-radius: var(--radius-md);
+  background: var(--intent-primary-soft);
+}
+.callout.success {
+  border-left-color: var(--intent-success);
+  background: var(--intent-success-soft);
+}
+.callout.warning {
+  border-left-color: var(--intent-warning);
+  background: var(--intent-warning-soft);
+}
+.callout.neutral {
+  border-left-color: var(--intent-neutral);
+  background: var(--surface-sunken);
+}
+.callout-text {
+  margin: 0;
+  font-weight: 500;
+}
+.callout-notes {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+.callout-notes .warning {
+  color: var(--intent-warning);
+}
+.callout-notes .danger {
+  color: var(--intent-danger);
+}
+.evidence {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  font: 12.5px / 1.5 var(--font-mono);
+  color: var(--text-muted);
+}
+.evidence li::before {
+  content: "• ";
+}
+.evidence li.success::before {
+  content: "✓ ";
+  color: var(--intent-success);
+}
+.evidence li.danger::before {
+  content: "✗ ";
+  color: var(--intent-danger);
+}
+.evidence li.warning::before {
+  content: "? ";
+  color: var(--intent-warning);
+}
+
+/* In suggest mode a section with an open change shows the change in place of its text. */
+.rd[data-mode="suggest"] .has-change,
+.rd:not([data-mode="suggest"]) .when-change {
+  display: none;
+}
+.rd:not([data-mode="edit"]) .when-edit,
+.rd:not([data-mode="suggest"]) .when-suggest {
+  display: none;
+}
+
+.rd-rail {
+  background: var(--surface-sunken);
+  border-left: 1px solid var(--border);
+  min-width: 0;
+}
+.rd-tabs {
+  display: none;
+  border-bottom: 1px solid var(--border);
+}
+.rd-tabs button {
+  flex: 1;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--text-muted);
+  padding: 10px 6px;
+}
+.rd-tabs button[aria-selected="true"] {
+  color: var(--text);
+  border-bottom-color: var(--intent-primary);
+}
+.rd-tabs .n {
+  font: 11px var(--font-mono);
+}
+.rd-panel {
+  padding: 14px;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+.panel-title {
+  margin: 0;
+  font: 500 11px var(--font-mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+html[data-patra-live] .rd-tabs {
+  display: flex;
+}
+html[data-patra-live] .panel-title {
+  display: none;
+}
+html[data-patra-live] .rd-panel[hidden] {
+  display: none;
+}
+html:not([data-patra-live]) .live-only {
+  display: none;
+}
+html[data-patra-live] .saved-only {
+  display: none;
+}
+
+.card {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+  font-size: 13.5px;
+  min-width: 0;
+}
+.card p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.card .who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.card .who b {
+  color: var(--text);
+  font-weight: 600;
+}
+.card blockquote {
+  margin: 0;
+  padding-left: 8px;
+  border-left: 3px solid var(--mark);
+  color: var(--text-muted);
+  font: italic 13px / 1.5 var(--font-reading);
+}
+.card .reply {
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+  display: grid;
+  gap: 2px;
+}
+.card.outdated {
+  opacity: 0.72;
+}
+.pin {
+  font: 600 11px var(--font-ui);
+  color: var(--intent-primary);
+}
+.diff {
+  display: grid;
+  gap: 4px;
+  font: 14px / 1.6 var(--font-reading);
+}
+.feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  font-size: 13px;
+}
+.feed li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.feed time {
+  font: 11px var(--font-mono);
+  color: var(--text-muted);
+}
+.ava {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-top: 5px;
+  background: var(--intent-neutral);
+}
+.ava.agent {
+  background: var(--intent-primary);
+}
+.ava.you {
+  background: var(--intent-success);
+}
+
+form.inline {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+form.inline label {
+  display: grid;
+  gap: 4px;
+}
+form.inline input,
+form.inline textarea {
+  width: 100%;
+  font: 13.5px / 1.55 var(--font-mono);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-page);
+  color: var(--text);
+}
+form.inline textarea {
+  resize: vertical;
+}
+.error {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--intent-danger);
+  background: var(--intent-danger-soft);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 1100px) {
+  .rd-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .rd-outline {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    order: 1;
+  }
+  .rd-page {
+    order: 2;
+  }
+  .rd-rail {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    order: 3;
+  }
+}
+
+/*
+ * Printing (and so PDF): the document, then its threads and changes, with no controls. The outline,
+ * mode switch, tabs, buttons and open forms are for the screen; every rail panel but the activity
+ * feed prints after the document, and a thread's pin number ties it to its <mark> in the text.
+ */
+@media print {
+  /* Paper is white whatever mode the screen was in: system colours, not the theme's dark ones. */
+  :root {
+    color-scheme: light;
+  }
+  body {
+    font-size: 11pt;
+    background: Canvas;
+    color: CanvasText;
+  }
+  .rd-bar {
+    position: static;
+    padding: 0 0 8pt;
+    background: none;
+  }
+  .rd-tools,
+  .rd-outline,
+  .rd-tabs,
+  .actions,
+  .slot,
+  .anchor,
+  .saved-only,
+  .live-only,
+  .rd-panel[data-patra-panel="activity"],
+  .rd-rail button {
+    display: none !important;
+  }
+  .rd-body {
+    display: block;
+    min-height: 0;
+  }
+  .rd-page {
+    padding: 12pt 0;
+    background: none;
+  }
+  .rd-rail {
+    border: 0;
+    background: none;
+  }
+  html[data-patra-live] .rd-panel[hidden],
+  .rd-panel {
+    display: grid;
+    padding: 12pt 0 0;
+  }
+  html[data-patra-live] .panel-title,
+  .panel-title {
+    display: block;
+    font-size: 10pt;
+    break-after: avoid;
+  }
+  .sec-head,
+  .callout,
+  .card,
+  .evidence li {
+    break-inside: avoid;
+  }
+  .sec-head h2,
+  .sec-head {
+    break-after: avoid;
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+}

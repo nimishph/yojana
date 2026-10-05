@@ -231,7 +231,8 @@ export async function approveRequirement(request: {
       `${request.requirement} changed since it was read; read it again before approving`,
     );
   }
-  if (plan.approvals.get(head.id)?.revision === head.revision) {
+  const verdict = plan.approvals.get(head.id);
+  if (verdict?.verdict === 'approved' && verdict.revision === head.revision) {
     return { ok: true, revision: head.revision, already: true };
   }
   await request.store.append(
@@ -240,6 +241,62 @@ export async function approveRequirement(request: {
       planId: plan.id,
       requirement: head.id,
       revision: head.revision,
+    },
+    request.actor,
+  );
+  return { ok: true, revision: head.revision, already: false };
+}
+
+/**
+ * Decline a requirement as it reads now, saying why (what would make it approvable): the other
+ * verdict to approving. Like an approval it is a review mark, not a gate, and goes stale when the
+ * requirement moves. The latest verdict stands, so approving later replaces it. A person only.
+ */
+export async function declineRequirement(request: {
+  readonly store: StorePort;
+  readonly planId: string;
+  readonly requirement: string;
+  readonly reason: string;
+  readonly revision?: string | undefined;
+  readonly actor: string;
+  readonly agent: boolean;
+}): Promise<ApprovalResult> {
+  if (request.agent) return refuse('PERSON_ONLY', PERSON_ONLY);
+  const reason = request.reason.trim();
+  if (reason === '') {
+    return refuse('REASON_REQUIRED', 'say why it is declined, so it can be changed to fit');
+  }
+  const plan = foldLog(await request.store.events()).plans.get(request.planId);
+  if (plan === undefined) return refuse('PLAN_NOT_FOUND', `the log has no plan ${request.planId}`);
+  const head = plan.heads.get(request.requirement);
+  if (head === undefined) {
+    return refuse('NOT_FOUND', `${request.requirement} is not a requirement of ${request.planId}`);
+  }
+  if (
+    request.revision !== undefined &&
+    request.revision !== '' &&
+    request.revision !== head.revision
+  ) {
+    return refuse(
+      'STALE',
+      `${request.requirement} changed since it was read; read it again before declining`,
+    );
+  }
+  const verdict = plan.approvals.get(head.id);
+  if (
+    verdict?.verdict === 'declined' &&
+    verdict.revision === head.revision &&
+    verdict.reason === reason
+  ) {
+    return { ok: true, revision: head.revision, already: true };
+  }
+  await request.store.append(
+    {
+      type: 'requirement-declined',
+      planId: plan.id,
+      requirement: head.id,
+      revision: head.revision,
+      reason,
     },
     request.actor,
   );

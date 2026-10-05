@@ -4,7 +4,8 @@
 # beads). Reads the log only, never bd or anvesa, so it is fast.
 #
 # $1 is the plugin's data folder (${CLAUDE_PLUGIN_DATA}), kept across plugin updates; the config
-# lives there. YOJANA_CONFIG, and YOJANA_HOME from the file's "home", go to CLAUDE_ENV_FILE, which
+# lives there. YOJANA_CONFIG, and YOJANA_HOME from the file's "home" (a checkout to run instead of
+# the bundled CLI), go to CLAUDE_ENV_FILE, which
 # Claude Code loads into the environment of the session's Bash commands. A YOJANA_CONFIG or
 # YOJANA_HOME already set (e.g. in settings.json) is kept.
 here="$(dirname "$0")"

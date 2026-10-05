@@ -1,0 +1,277 @@
+{
+  "document": {
+    "id": "plan/medha-inspired-evolution",
+    "title": "Anvesa architecture and evolution",
+    "crumbs": "anvesa / plans / medha-inspired-evolution.md",
+    "status": {
+      "label": "in-progress",
+      "intent": "primary"
+    },
+    "metrics": [
+      {
+        "label": "0/7 beads",
+        "meter": {
+          "value": 0,
+          "max": 7
+        }
+      },
+      {
+        "label": "9 hold",
+        "intent": "success"
+      },
+      {
+        "label": "3 violated",
+        "intent": "danger"
+      },
+      {
+        "label": "file in step",
+        "intent": "success"
+      }
+    ],
+    "mode": "suggest",
+    "intro": {
+      "kind": "markdown",
+      "source": "Medha moved from TypeScript to Rust by progressive hybrid enhancement: hot routines ported behind a NAPI-RS bridge with a TypeScript fallback, the CLI kept as the daily driver, and the standalone native binary assembled last. Anvesa follows the same order."
+    },
+    "source": "plans/medha-inspired-evolution.md",
+    "freshness": "claims checked 08:14 UTC; beads 2m ago"
+  },
+  "filters": [
+    {
+      "id": "attention",
+      "label": "Needs attention",
+      "count": 8,
+      "active": true
+    },
+    {
+      "id": "close",
+      "label": "Close?",
+      "count": 6
+    },
+    {
+      "id": "violated",
+      "label": "Violated",
+      "count": 2
+    }
+  ],
+  "callouts": [
+    {
+      "id": "status",
+      "text": "claude proposes moving this plan to accepted: “the requirements and claims are settled”.",
+      "intent": "primary",
+      "notes": [
+        {
+          "label": "5 of 7 requirements not approved",
+          "intent": "warning"
+        },
+        {
+          "label": "2 open threads"
+        },
+        {
+          "label": "1 open change",
+          "intent": "warning"
+        }
+      ],
+      "buttons": [
+        {
+          "action": "confirm",
+          "label": "Accept the plan",
+          "decision": "accepted",
+          "primary": true
+        },
+        {
+          "action": "decline",
+          "label": "Not yet"
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "id": "req-primer",
+      "title": "Token-frugal primer with an anti-drift test",
+      "version": "r_357f348272f80f4c",
+      "health": "success",
+      "note": "close? · 2 threads",
+      "tags": ["attention", "close"],
+      "properties": [
+        {
+          "label": "anv-35b · open"
+        },
+        {
+          "label": "2/2 claims hold",
+          "intent": "success"
+        },
+        {
+          "label": "approved by nimish",
+          "intent": "success"
+        }
+      ],
+      "flags": [
+        {
+          "text": "Every claim holds but anv-35b is still open.",
+          "buttons": [
+            {
+              "action": "decide",
+              "label": "Close anv-35b",
+              "item": "anv-35b",
+              "primary": true,
+              "decision": "close"
+            }
+          ]
+        }
+      ],
+      "body": {
+        "kind": "markdown",
+        "source": "`anvesa primer [topic]` (and an MCP `primer` tool) serves 25-40 line topics: overview, wql, fusion, graph, indexing, grammars. A test fails when a CLI command or MCP tool is not covered by a topic.",
+        "marks": [
+          {
+            "text": "serves 25-40 line topics",
+            "id": "t1"
+          },
+          {
+            "text": "A test fails when a CLI command or MCP tool is not covered by a topic.",
+            "id": "t2"
+          }
+        ]
+      },
+      "evidence": [
+        {
+          "label": "path cli/src/primer.ts · 1 match",
+          "intent": "success"
+        },
+        {
+          "label": "path cli/src/primer.test.ts · 1 match",
+          "intent": "success"
+        }
+      ],
+      "editable": {
+        "title": "Token-frugal primer with an anti-drift test",
+        "text": "`anvesa primer [topic]` (and an MCP `primer` tool) serves 25-40 line topics: overview, wql, fusion, graph, indexing, grammars. A test fails when a CLI command or MCP tool is not covered by a topic."
+      },
+      "buttons": [
+        {
+          "action": "approve",
+          "label": "Approve"
+        }
+      ]
+    },
+    {
+      "id": "req-ui",
+      "title": "Local dashboard and graph explorer",
+      "version": "r_2254fb68282c1ea1",
+      "health": "danger",
+      "note": "1 change",
+      "tags": ["attention", "violated"],
+      "properties": [
+        {
+          "label": "anv-p29 · open"
+        },
+        {
+          "label": "1 violated",
+          "intent": "danger"
+        },
+        {
+          "label": "1 open change",
+          "intent": "warning"
+        }
+      ],
+      "body": {
+        "kind": "markdown",
+        "source": "`anvesa ui` serves a self-contained page with a search and WQL playground, a call graph and blast radius view, and index health. The first cut is the index health dashboard only."
+      },
+      "proposed": {
+        "kind": "diff",
+        "before": "anvesa ui serves a self-contained page with a search and WQL playground, a call graph and blast radius view, and index health. The first cut is the index health dashboard only.",
+        "after": "anvesa ui starts as an index health dashboard; the playground and graph explorer follow."
+      },
+      "evidence": [
+        {
+          "label": "path cli/src/ui.ts · does not exist",
+          "intent": "danger"
+        }
+      ],
+      "editable": {
+        "title": "Local dashboard and graph explorer",
+        "text": "`anvesa ui` serves a self-contained page with a search and WQL playground, a call graph and blast radius view, and index health. The first cut is the index health dashboard only."
+      }
+    }
+  ],
+  "threads": [
+    {
+      "id": "n_5a665e71",
+      "section": "req-primer",
+      "mark": "1",
+      "quote": "serves 25-40 line topics",
+      "author": "reviewer",
+      "when": "now",
+      "body": "Which six topics, exactly? Is grammars worth a topic?"
+    },
+    {
+      "id": "n_2557ba18",
+      "section": "req-ui",
+      "author": "reviewer",
+      "when": "2h",
+      "body": "No ui.ts yet. Is this still wanted for v1?",
+      "outdated": true,
+      "replies": [
+        {
+          "author": "nimish",
+          "when": "2h",
+          "body": "Yes, after the plugin work. Narrowing it to the health dashboard."
+        }
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "id": "suggest-ui-bf4bda",
+      "title": "Suggested edit to req-ui",
+      "author": "reviewer",
+      "when": "12m",
+      "status": {
+        "label": "applies cleanly",
+        "intent": "success"
+      },
+      "applies": true,
+      "why": "Narrow the first cut.",
+      "diffs": [
+        {
+          "section": "req-ui",
+          "label": "modify req-ui",
+          "diff": {
+            "kind": "diff",
+            "before": "anvesa ui serves a self-contained page with a search and WQL playground, a call graph and blast radius view, and index health.",
+            "after": "anvesa ui starts as an index health dashboard; the playground and graph explorer follow."
+          }
+        }
+      ]
+    }
+  ],
+  "activity": [
+    {
+      "id": "a1",
+      "who": "reviewer",
+      "kind": "person",
+      "what": "commented on req-primer",
+      "when": "just now",
+      "where": "page"
+    },
+    {
+      "id": "a2",
+      "who": "nimish",
+      "kind": "you",
+      "what": "edited req-native-binary",
+      "when": "2m",
+      "where": "page"
+    },
+    {
+      "id": "a3",
+      "who": "claude",
+      "kind": "agent",
+      "what": "archived text-claims",
+      "when": "40m",
+      "where": "CLI"
+    }
+  ]
+}

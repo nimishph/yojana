@@ -14,7 +14,12 @@ export {
   type PlanFileUpdate,
 } from './changes.ts';
 export { type CheckReport, check, type PlanCheck } from './check.ts';
-export { type CommentResult, comment } from './comment.ts';
+export {
+  type CommentResult,
+  comment,
+  type RemoveCommentResult,
+  removeComment,
+} from './comment.ts';
 export {
   type AppliedDecision,
   applyDecisions,
@@ -38,6 +43,7 @@ export {
 export {
   type ApprovalResult,
   approveRequirement,
+  declineRequirement,
   declineStatus,
   finalizeStatus,
   type ProposalResult,
@@ -47,6 +53,7 @@ export {
 export { type ItemProgress, type PlanProgress, progress } from './progress.ts';
 export {
   ACTIVITY_LIMIT,
+  AGENT_ACTORS,
   ago,
   type ProjectOptions,
   projectReview,

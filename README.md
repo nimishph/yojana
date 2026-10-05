@@ -15,7 +15,7 @@ It is part of the cntxt-labs set: **bd** for work, **medha** for rules, **anvesa
 **yojana** for intent.
 
 > [!NOTE]
-> Pre-release. The domain model, ports and conflict check exist; the commands are being built.
+> Pre-release: the commands work and are tested, but the log format and commands may still change.
 > See [docs/design.md](docs/design.md) and [examples/plans](examples/plans).
 
 ## Claude Code plugin
@@ -24,7 +24,7 @@ It is part of the cntxt-labs set: **bd** for work, **medha** for rules, **anvesa
 
 - the `yojana` skill: plan and change file formats, commands, and the rule that Claude proposes
   (suggested changes, `yojana decide`, `yojana propose-status`) while the person decides: only a
-  person accepts a plan, moves its status, or approves a requirement;
+  person accepts a plan, moves its status, or approves or declines a requirement;
 - `/yojana:plan <what>` drafts a plan with checkable claims; `/yojana:review` opens the live
   review pages;
 - a `yojana` command on Claude's PATH that records its actions as `claude` (pages served by
@@ -33,24 +33,24 @@ It is part of the cntxt-labs set: **bd** for work, **medha** for rules, **anvesa
   Customize), and, in a repository with `.yojana/`, tells Claude so and lists open changes and
   decisions waiting on a person (log only; it never calls bd or anvesa).
 
-It runs the CLI from a checkout, so set up the checkout first (see Develop), then in Claude
-Code:
+It needs [Bun](https://bun.sh) on the PATH, and nothing else: the CLI is bundled in
+`claude-plugin/lib/`. In Claude Code:
 
 ```
 /plugin marketplace add nimishph/cntxt-labs
 /plugin install yojana@cntxt-labs
 ```
 
-An installed plugin is a copy of `claude-plugin/` alone, so it needs to know where the checkout
-is: set `home` in the plugin's `yojana.config.json` (below), or `YOJANA_HOME` in the environment,
-for example in `~/.claude/settings.json`:
+To run a checkout instead of the bundle (while developing yojana), set `YOJANA_HOME` to it, for
+example in `~/.claude/settings.json`, or `home` in the plugin's `yojana.config.json` (below):
 
 ```json
 { "env": { "YOJANA_HOME": "/path/to/yojana" } }
 ```
 
-`YOJANA_HOME` wins over `home`. Without either, `yojana` works only when the plugin runs in place:
-`claude --plugin-dir claude-plugin`.
+`YOJANA_HOME` wins over `home`. Running in place (`claude --plugin-dir claude-plugin`) uses the
+checkout's source. After changing the CLI or taking a newer patra, run `bun run bundle`;
+`bun run check` fails while `claude-plugin/lib/` is out of date.
 
 ### Customize: `yojana.config.json`
 
@@ -75,7 +75,7 @@ Every setting is optional, and so is the file:
 | Setting | What it does |
 | --- | --- |
 | `vars` | path variables, usable as `${name}` in any path below (and in later vars) |
-| `home` | the yojana checkout the plugin runs, used when `YOJANA_HOME` is not set |
+| `home` | a yojana checkout to run instead of the bundled CLI, when `YOJANA_HOME` is not set |
 | `theme.css` | a stylesheet that replaces patra's default theme; it must define the same tokens |
 | `theme.fonts` | font families for `reading` (plan text), `ui` (controls) and `mono` (ids, code) |
 | `theme.tokens` | theme tokens, light mode, and every mode for tokens the theme sets once (fonts, radii) |
