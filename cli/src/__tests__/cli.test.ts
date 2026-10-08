@@ -83,7 +83,7 @@ async function yojana(...args: string[]): Promise<{ code: number; out: string }>
 describe('yojana CLI, start to finish', () => {
   test('--version and help', async () => {
     const version = await yojana('--version');
-    expect(version).toEqual({ code: 0, out: '0.0.0\n' });
+    expect(version).toEqual({ code: 0, out: '0.1.0\n' });
     const help = await yojana('--help');
     expect(help.code).toBe(0);
     expect(help.out).toContain('Exit codes:');
@@ -332,5 +332,31 @@ describe('yojana CLI, start to finish', () => {
     );
     expect((await yojana('import', 'ROADMAP.md', '--id', 'plan/roadmap', '--force')).code).toBe(0);
     expect((await yojana('import', 'ROADMAP.md')).code).toBe(2);
+  });
+});
+
+describe('yojana init', () => {
+  test('sets up a fresh repository with a starter plan that ingests cleanly', async () => {
+    const fresh = mkdtempSync(join(tmpdir(), 'yojana-init-'));
+    try {
+      const at = async (...args: string[]) => {
+        let out = '';
+        const code = await run([...args, '--root', fresh], (text) => {
+          out += text;
+        });
+        return { code, out };
+      };
+      writeFileSync(join(fresh, 'README.md'), '# demo');
+      const init = await at('init');
+      expect(init.code).toBe(0);
+      expect(existsSync(join(fresh, 'plans', 'getting-started.md'))).toBe(true);
+      expect(existsSync(join(fresh, '.yojana', '.gitattributes'))).toBe(true);
+      expect((await at('ingest')).code).toBe(0);
+
+      const again = await at('init');
+      expect(again.out).toContain('kept your plans');
+    } finally {
+      rmSync(fresh, { recursive: true, force: true });
+    }
   });
 });

@@ -50,6 +50,7 @@ import { reviewTemplate, startReviewServer } from './serve.ts';
 const USAGE = `yojana ${VERSION}: plans as checkable contracts
 
 Usage:
+  yojana init [--force]                     set up .yojana/ and a starter plan in this repository
   yojana ingest [--trust-file]              record edits to plan files
   yojana change open <file>                 open a change file against the log
   yojana changes [--all]                    list open changes (--all: closed ones too)
@@ -961,6 +962,47 @@ function runConfig(flags: Flags, write: Write): number {
   return 0;
 }
 
+const STARTER_PLAN = `---
+id: plan/getting-started
+title: Getting started with yojana
+status: draft
+---
+
+# Getting started with yojana
+
+Why: a plan is a contract you can check. Replace this one with your own.
+
+## Requirement: the repository has a README {#req-readme}
+
+Anyone arriving at the repository finds a README at its root.
+
+\`\`\`yojana:claim
+kind: path
+expression: README.md
+\`\`\`
+`;
+
+function runInit(flags: Flags, write: Write): number {
+  ensureGitAttributes(flags.root);
+  const plansDir = resolve(flags.root, flags.plans ?? 'plans');
+  mkdirSync(plansDir, { recursive: true });
+  mkdirSync(resolve(flags.root, flags.changes ?? 'changes'), { recursive: true });
+  const starter = join(plansDir, 'getting-started.md');
+  const starterSource = toSource(flags.root, starter);
+  const wrote = flags.force || loadPlanFiles(flags.root, plansDir).length === 0;
+  if (wrote) writeFileSync(starter, STARTER_PLAN);
+  const lines = [
+    'yojana is set up: .yojana/ holds the log (commit it).',
+    wrote
+      ? `  wrote ${starterSource}, a starter plan to edit or delete`
+      : `  kept your plans; --force writes ${starterSource} anyway`,
+    'next: yojana ingest, then yojana status',
+  ];
+  const result = { root: flags.root, starterPlan: wrote ? starterSource : null };
+  emit(flags, write, result, `${lines.join('\n')}\n`);
+  return 0;
+}
+
 function runImport(flags: Flags, write: Write): number {
   const [file] = flags.positional;
   if (file === undefined || flags.id === undefined) {
@@ -1213,6 +1255,7 @@ export async function run(argv: readonly string[], write: Write): Promise<number
   }
   try {
     const flags = () => parseFlags(rest);
+    if (command === 'init') return runInit(flags(), write);
     if (command === 'ingest') return await runIngest(flags(), write);
     if (command === 'change' && rest[0] === 'open') return await runChangeOpen(flags(), write);
     if (command === 'changes') return await runChanges(flags(), write);

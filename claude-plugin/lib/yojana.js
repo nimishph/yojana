@@ -5360,7 +5360,7 @@ function reviewSession(options) {
 }
 
 // yojana/src/index.ts
-var VERSION = "0.0.0";
+var VERSION = "0.1.0";
 
 // yojana-verify/src/evidence.ts
 var EVIDENCE_ITEMS = 3;
@@ -6405,6 +6405,7 @@ function startReviewServer(options) {
 var USAGE = `yojana ${VERSION}: plans as checkable contracts
 
 Usage:
+  yojana init [--force]                     set up .yojana/ and a starter plan in this repository
   yojana ingest [--trust-file]              record edits to plan files
   yojana change open <file>                 open a change file against the log
   yojana changes [--all]                    list open changes (--all: closed ones too)
@@ -7132,6 +7133,46 @@ function runConfig(flags, write) {
 `));
   return 0;
 }
+var STARTER_PLAN = `---
+id: plan/getting-started
+title: Getting started with yojana
+status: draft
+---
+
+# Getting started with yojana
+
+Why: a plan is a contract you can check. Replace this one with your own.
+
+## Requirement: the repository has a README {#req-readme}
+
+Anyone arriving at the repository finds a README at its root.
+
+\`\`\`yojana:claim
+kind: path
+expression: README.md
+\`\`\`
+`;
+function runInit(flags, write) {
+  ensureGitAttributes(flags.root);
+  const plansDir = resolve2(flags.root, flags.plans ?? "plans");
+  mkdirSync5(plansDir, { recursive: true });
+  mkdirSync5(resolve2(flags.root, flags.changes ?? "changes"), { recursive: true });
+  const starter = join9(plansDir, "getting-started.md");
+  const starterSource = toSource(flags.root, starter);
+  const wrote = flags.force || loadPlanFiles(flags.root, plansDir).length === 0;
+  if (wrote)
+    writeFileSync3(starter, STARTER_PLAN);
+  const lines = [
+    "yojana is set up: .yojana/ holds the log (commit it).",
+    wrote ? `  wrote ${starterSource}, a starter plan to edit or delete` : `  kept your plans; --force writes ${starterSource} anyway`,
+    "next: yojana ingest, then yojana status"
+  ];
+  const result = { root: flags.root, starterPlan: wrote ? starterSource : null };
+  emit(flags, write, result, `${lines.join(`
+`)}
+`);
+  return 0;
+}
 function runImport(flags, write) {
   const [file] = flags.positional;
   if (file === undefined || flags.id === undefined) {
@@ -7336,6 +7377,8 @@ async function run(argv, write) {
   }
   try {
     const flags = () => parseFlags(rest);
+    if (command === "init")
+      return runInit(flags(), write);
     if (command === "ingest")
       return await runIngest(flags(), write);
     if (command === "change" && rest[0] === "open")

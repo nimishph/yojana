@@ -26,6 +26,7 @@
     "boundaries": "depcruise --config .dependency-cruiser.cjs yojana-core/src yojana-store/src yojana-sync/src yojana-markdown/src yojana-verify/src yojana-work/src yojana/src cli/src",
     "test": "bun test",
     "bundle": "bun tooling/bundle-plugin.ts",
+    "pack:npm": "bun tooling/pack-npm.ts",
     "check": "bun run lint && bun run typecheck && bun run boundaries && bun run test && bun tooling/bundle-plugin.ts --check",
     "changelog": "git-cliff -o CHANGELOG.md",
     "changelog:preview": "git-cliff --unreleased"
@@ -34,6 +35,7 @@
     "@biomejs/biome": "^2.5.14",
     "@types/bun": "^1.4.2",
     "dependency-cruiser": "^18.3.1",
+    "git-cliff": "^2.14.2",
     "typescript": "^5.9.0"
   },
   "license": "MIT",

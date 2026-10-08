@@ -18,6 +18,20 @@ It is part of the cntxt-labs set: **bd** for work, **medha** for rules, **anvesa
 > Pre-release: the commands work and are tested, but the log format and commands may still change.
 > See [docs/design.md](docs/design.md) and [examples/plans](examples/plans).
 
+## Install
+
+```sh
+bun add -g @cntxt-labs/yojana     # or: npm i -g @cntxt-labs/yojana
+cd your-repo
+yojana init                       # .yojana/ and a starter plan
+yojana ingest && yojana status
+```
+
+[Bun](https://bun.sh) 1.3 or later must be on the PATH (the `yojana` command runs on it, also when
+installed with npm). Claims are checked through [anvesa](https://github.com/nimishph/anvesa) and
+progress is read from [bd](https://github.com/steveyegge/beads); both are optional and found on the
+PATH (or `ANVESA_BIN`, `BD_BIN`).
+
 ## Claude Code plugin
 
 [`claude-plugin/`](claude-plugin) makes yojana available inside Claude Code:
