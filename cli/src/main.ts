@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { userInfo } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { pageHead, renderPage } from '@cntxt-labs/patra-core';
 import { themeFile } from '@cntxt-labs/patra-themes';
@@ -44,6 +44,7 @@ import {
 import { foldLog, type VerifierPort, YojanaError } from '@cntxt-labs/yojana-core';
 import { AnvesaVerifier, PathVerifier, spawnAnvesa, TextVerifier } from '@cntxt-labs/yojana-verify';
 import { BdWorkLink, spawnBd } from '@cntxt-labs/yojana-work';
+import SKILL from '../../claude-plugin/skills/yojana/SKILL.md' with { type: 'text' };
 import { loadConfig, themeStylesheet } from './config.ts';
 import { reviewTemplate, startReviewServer } from './serve.ts';
 
@@ -51,6 +52,8 @@ const USAGE = `yojana ${VERSION}: plans as checkable contracts
 
 Usage:
   yojana init [--force]                     set up .yojana/ and a starter plan in this repository
+  yojana primer                             print how to work with yojana (for an agent's context)
+  yojana skill install [--global|--dir d]   install the yojana skill for Claude Code (.claude/skills)
   yojana ingest [--trust-file]              record edits to plan files
   yojana change open <file>                 open a change file against the log
   yojana changes [--all]                    list open changes (--all: closed ones too)
@@ -137,6 +140,8 @@ interface Flags {
   readonly content: boolean;
   readonly port: number;
   readonly apply: boolean;
+  readonly global: boolean;
+  readonly dir: string | undefined;
   readonly final: boolean;
   readonly finalize: string | undefined;
   readonly decline: string | undefined;
@@ -165,6 +170,8 @@ function parseFlags(argv: readonly string[]): Flags {
     content: false,
     port: DEFAULT_PORT,
     apply: false,
+    global: false,
+    dir: undefined as string | undefined,
     final: false,
     finalize: undefined as string | undefined,
     decline: undefined as string | undefined,
@@ -190,6 +197,8 @@ function parseFlags(argv: readonly string[]): Flags {
     else if (arg === '--serve') flags.serve = true;
     else if (arg === '--content') flags.content = true;
     else if (arg === '--apply') flags.apply = true;
+    else if (arg === '--global') flags.global = true;
+    else if (arg === '--dir') flags.dir = value();
     else if (arg === '--final') flags.final = true;
     else if (arg === '--finalize') flags.finalize = value();
     else if (arg === '--decline') flags.decline = value();
@@ -962,6 +971,34 @@ function runConfig(flags: Flags, write: Write): number {
   return 0;
 }
 
+/** The skill's text after its frontmatter: what an agent needs in context to use yojana. */
+function primerText(): string {
+  return SKILL.replace(/^---\n[\s\S]*?\n---\n+/, '');
+}
+
+function runPrimer(write: Write): number {
+  write(primerText());
+  return 0;
+}
+
+function runSkill(flags: Flags, write: Write): number {
+  if (flags.positional[0] !== 'install') {
+    throw new YojanaError(
+      'CLI_USAGE',
+      'usage: yojana skill install [--global | --dir <skills dir>]',
+    );
+  }
+  const skills =
+    flags.dir === undefined
+      ? join(flags.global ? homedir() : flags.root, '.claude', 'skills')
+      : resolve(flags.root, flags.dir);
+  const target = join(skills, 'yojana', 'SKILL.md');
+  mkdirSync(join(skills, 'yojana'), { recursive: true });
+  writeFileSync(target, SKILL);
+  emit(flags, write, { installed: target }, `installed the yojana skill: ${target}\n`);
+  return 0;
+}
+
 const STARTER_PLAN = `---
 id: plan/getting-started
 title: Getting started with yojana
@@ -1255,6 +1292,8 @@ export async function run(argv: readonly string[], write: Write): Promise<number
   }
   try {
     const flags = () => parseFlags(rest);
+    if (command === 'primer') return runPrimer(write);
+    if (command === 'skill') return runSkill(flags(), write);
     if (command === 'init') return runInit(flags(), write);
     if (command === 'ingest') return await runIngest(flags(), write);
     if (command === 'change' && rest[0] === 'open') return await runChangeOpen(flags(), write);

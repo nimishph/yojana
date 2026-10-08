@@ -24,6 +24,8 @@ It is part of the cntxt-labs set: **bd** for work, **medha** for rules, **anvesa
 bun add -g @cntxt-labs/yojana     # or: npm i -g @cntxt-labs/yojana
 cd your-repo
 yojana init                       # .yojana/ and a starter plan
+yojana skill install              # the skill, for Claude Code (--global for all projects)
+yojana primer                     # how to use yojana, printed for any agent's context
 yojana ingest && yojana status
 ```
 

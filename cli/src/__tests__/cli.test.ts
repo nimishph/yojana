@@ -360,3 +360,21 @@ describe('yojana init', () => {
     }
   });
 });
+
+describe('yojana primer and skill', () => {
+  test('primer prints the skill without its frontmatter', async () => {
+    const primer = await yojana('primer');
+    expect(primer.code).toBe(0);
+    expect(primer.out.startsWith('# yojana')).toBe(true);
+    expect(primer.out).not.toContain('name: yojana');
+  });
+
+  test('skill install writes SKILL.md under the chosen skills folder', async () => {
+    const result = await yojana('skill', 'install', '--dir', '.claude/skills');
+    expect(result.code).toBe(0);
+    expect(readFileSync(join(root, '.claude', 'skills', 'yojana', 'SKILL.md'), 'utf8')).toContain(
+      'name: yojana',
+    );
+    expect((await yojana('skill')).code).toBe(2);
+  });
+});
