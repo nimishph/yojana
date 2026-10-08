@@ -1,0 +1,31 @@
+name: Promote
+
+# Moves the `latest` dist-tag of @cntxt-labs/yojana to a version already on the registry, by hand:
+# to make a checked version live, or to roll back. Check it first, e.g.
+#   npm install -g @cntxt-labs/yojana@0.1.0
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to make latest, without the v (e.g. 0.1.0)
+        required: true
+        type: string
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Check the version is on the registry
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then echo "NPM_TOKEN is not set" >&2; exit 1; fi
+          npm view "@cntxt-labs/yojana@${VERSION}" version >/dev/null \
+            || { echo "@cntxt-labs/yojana@${VERSION} is not on the registry" >&2; exit 1; }
+      - name: Point latest at it
+        run: npm dist-tag add "@cntxt-labs/yojana@${VERSION}" latest

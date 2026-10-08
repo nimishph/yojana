@@ -1,0 +1,88 @@
+name: Release
+
+# Trigger on version tags (e.g. v0.1.0)
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    name: Stage on npm & create release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # npm 11+, for `npm stage publish`
+          registry-url: https://registry.npmjs.org
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+
+      - name: Verify tag matches the engine version
+        run: |
+          version="$(bun -e "import { VERSION } from '@cntxt-labs/yojana'; console.log(VERSION)")"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match VERSION ${version} (yojana/src/index.ts)" >&2
+            exit 1
+          fi
+
+      # git-cliff --latest lists what changed since the previous tag it can reach. A previous tag
+      # that is not in this tag's history makes it list every commit ever made, so say so.
+      - name: Check the previous release is in this one's history
+        run: |
+          previous="$(git tag --list 'v*' --sort=-v:refname | grep -vx "${GITHUB_REF_NAME}" | head -n 1)"
+          if [ -n "${previous}" ] && ! git merge-base --is-ancestor "${previous}" "${GITHUB_REF_NAME}"; then
+            echo "::warning::${previous} is not an ancestor of ${GITHUB_REF_NAME}: the release notes will list the whole history."
+          fi
+
+      - name: Generate Changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: RELEASE_CHANGELOG.md
+
+      - run: bun run pack:npm
+
+      # A version already on the registry is skipped (so a re-run is safe); any other failure stops
+      # the release. `npm stage publish` defers 2FA to the approval step you run yourself, so CI
+      # needs only an ordinary automation token, not a bypass-2FA one. Approving makes it live.
+      - name: Stage on npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "NPM_TOKEN is not set: refusing to release without staging on npm" >&2
+            exit 1
+          fi
+          name="$(node -p "require('./dist/npm/package.json').name")"
+          version="$(node -p "require('./dist/npm/package.json').version")"
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            echo "${name}@${version} is already published, skipping"
+          else
+            npm stage publish ./dist/npm --access public --provenance --tag latest
+          fi
+
+      - name: List what needs approval
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "::notice::The package is staged, not live yet. Run 'npm stage approve <id>' (with your own 2FA), or 'npm stage list' to see it again."
+          npm stage list "@cntxt-labs/yojana" || true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: yojana ${{ github.ref_name }}
+          body_path: RELEASE_CHANGELOG.md
+          generate_release_notes: true
