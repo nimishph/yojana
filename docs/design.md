@@ -4,7 +4,7 @@
 
 ## Why
 
-The cntxt-labs tools each own one layer of an agent's working context:
+The cntxt-labs tools (medha, anvesa, yojana) and bd, which is not one of them but is the work layer they build on, each own one layer of an agent's working context:
 
 | Tool | Layer | Answers |
 |---|---|---|
