@@ -3116,10 +3116,10 @@ function parseDocument(input, issue) {
     let badAttribute = false;
     for (const attribute of draft.attributes) {
       const [key, value = ""] = attribute.split("=", 2);
-      if (key === "beads" && value !== "") {
+      if ((key === "beads" || key === "bead" || key === "issues" || key === "issue" || key === "work") && value !== "") {
         workItems = value.split(",").filter((b) => b !== "");
       } else {
-        issue(draft.line, "INVALID_REQUIREMENT_ATTRIBUTE", `"${attribute}" is not understood; known: beads=<id>[,<id>...]`);
+        issue(draft.line, "INVALID_REQUIREMENT_ATTRIBUTE", `"${attribute}" is not understood; known: beads=<id>, issue=<id>, or work=<id>[,<id>...]`);
         badAttribute = true;
       }
     }
@@ -3152,10 +3152,10 @@ function parseDocument(input, issue) {
       let badActionAttr = false;
       for (const attr of actDraft.attributes) {
         const [key, value = ""] = attr.split("=", 2);
-        if ((key === "bead" || key === "beads") && value !== "") {
+        if ((key === "bead" || key === "beads" || key === "issue" || key === "issues" || key === "work") && value !== "") {
           actionWorkItems = value.split(",").filter((b) => b !== "");
         } else {
-          issue(actDraft.line, "INVALID_ACTION_ATTRIBUTE", `"${attr}" is not understood; known: bead=<id> or beads=<id>[,<id>...]`);
+          issue(actDraft.line, "INVALID_ACTION_ATTRIBUTE", `"${attr}" is not understood; known: bead=<id>, issue=<id>, or work=<id>[,<id>...]`);
           badActionAttr = true;
         }
       }
@@ -3414,9 +3414,10 @@ function parsePlan(source, input) {
     }
   }
   let workItems = [];
-  if (meta.beads !== undefined) {
-    if (Array.isArray(meta.beads) && meta.beads.every((b) => typeof b === "string")) {
-      workItems = meta.beads.map((b) => b.trim());
+  const rawWork = meta.beads ?? meta.issues ?? meta.work;
+  if (rawWork !== undefined) {
+    if (Array.isArray(rawWork) && rawWork.every((b) => typeof b === "string")) {
+      workItems = rawWork.map((b) => b.trim());
     } else {
       issue(2, "INVALID_BEADS", "`beads` must be a list of bead ids");
     }
@@ -7848,6 +7849,17 @@ function normalizeId(id) {
     return id.slice(3);
   return id;
 }
+function parseTarget(id, defaultRepo) {
+  const urlMatch = id.match(/^https?:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)$/i);
+  if (urlMatch !== null && urlMatch[1] !== undefined && urlMatch[2] !== undefined) {
+    return { repo: urlMatch[1], target: urlMatch[2] };
+  }
+  const repoMatch = id.match(/^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)$/);
+  if (repoMatch !== null && repoMatch[1] !== undefined && repoMatch[2] !== undefined) {
+    return { repo: repoMatch[1], target: repoMatch[2] };
+  }
+  return { repo: defaultRepo, target: normalizeId(id) };
+}
 
 class GhWorkLink {
   name = "github";
@@ -7862,7 +7874,7 @@ class GhWorkLink {
       return { ok: true, items: [] };
     const found = new Map;
     const lookups = await Promise.all(ids.map(async (id) => {
-      const target = normalizeId(id);
+      const { target, repo } = parseTarget(id, this.#repo);
       const args = [
         "issue",
         "view",
@@ -7870,8 +7882,8 @@ class GhWorkLink {
         "--json",
         "number,title,state,stateReason,body,subIssues"
       ];
-      if (this.#repo !== undefined)
-        args.push("-R", this.#repo);
+      if (repo !== undefined)
+        args.push("-R", repo);
       let result;
       try {
         result = await this.#run(args);
@@ -7909,6 +7921,9 @@ class GhWorkLink {
         found.set(id, item);
         found.set(num, item);
         found.set(`#${num}`, item);
+        if (repo !== undefined) {
+          found.set(`${repo}#${num}`, item);
+        }
         return { ok: true };
       } catch {
         const text = (result.stderr || result.stdout).trim();
@@ -7928,7 +7943,7 @@ class GhWorkLink {
     };
   }
   async children(id) {
-    const target = normalizeId(id);
+    const { target, repo } = parseTarget(id, this.#repo);
     const args = [
       "issue",
       "view",
@@ -7936,8 +7951,8 @@ class GhWorkLink {
       "--json",
       "number,title,state,stateReason,body,subIssues"
     ];
-    if (this.#repo !== undefined)
-      args.push("-R", this.#repo);
+    if (repo !== undefined)
+      args.push("-R", repo);
     let result;
     try {
       result = await this.#run(args);
@@ -8002,33 +8017,35 @@ class GhWorkLink {
     }
   }
   async close(id, reason) {
-    const target = normalizeId(id);
+    const { target, repo } = parseTarget(id, this.#repo);
     const args = ["issue", "close", target];
     if (reason)
       args.push("--comment", reason);
-    if (this.#repo !== undefined)
-      args.push("-R", this.#repo);
+    if (repo !== undefined)
+      args.push("-R", repo);
     return this.#change("close", target, args);
   }
   async reopen(id, reason) {
-    const target = normalizeId(id);
+    const { target, repo } = parseTarget(id, this.#repo);
     const args = ["issue", "reopen", target];
     if (reason)
       args.push("--comment", reason);
-    if (this.#repo !== undefined)
-      args.push("-R", this.#repo);
+    if (repo !== undefined)
+      args.push("-R", repo);
     return this.#change("reopen", target, args);
   }
   async create(options) {
+    const { repo: parentRepo, target: parentTarget } = options.parent ? parseTarget(options.parent, this.#repo) : { repo: this.#repo, target: undefined };
+    const repo = parentRepo ?? this.#repo;
     const args = ["issue", "create", "--title", options.title];
     if (options.description)
       args.push("--body", options.description);
     else
       args.push("--body", "");
-    if (options.parent !== undefined)
-      args.push("--parent", normalizeId(options.parent));
-    if (this.#repo !== undefined)
-      args.push("-R", this.#repo);
+    if (parentTarget !== undefined)
+      args.push("--parent", parentTarget);
+    if (repo !== undefined)
+      args.push("-R", repo);
     let result;
     try {
       result = await this.#run(args);
@@ -8086,7 +8103,7 @@ class GhWorkLink {
 }
 
 // yojana-work/src/composite.ts
-var GITHUB_ID_PATTERN = /^(?:#\d+|\d+|gh-\d+|gh#\d+)$/i;
+var GITHUB_ID_PATTERN = /^(?:#\d+|\d+|gh-\d+|gh#\d+|[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#\d+|https?:\/\/github\.com\/.+)$/i;
 var BEAD_ID_PATTERN = /^[a-z0-9]+-[a-z0-9]+(?:\.[a-z0-9]+)*$/i;
 var CHECKLIST_ID_PATTERN = /^(?:req|act)-/i;
 
@@ -9306,6 +9323,7 @@ function parseFlags(argv) {
     decline: undefined,
     dryRun: false,
     tracker: undefined,
+    repo: undefined,
     positional: []
   };
   for (let i = 0;i < argv.length; i++) {
@@ -9354,6 +9372,8 @@ function parseFlags(argv) {
       flags.decline = value();
     else if (arg === "--tracker" || arg === "--worklink")
       flags.tracker = value();
+    else if (arg === "--repo")
+      flags.repo = value();
     else if (arg === "--port") {
       const port = Number(value());
       if (!Number.isInteger(port) || port < 0 || port > MAX_PORT) {
@@ -9689,7 +9709,7 @@ function worklink(root, flags) {
     type,
     root,
     plansDir,
-    repo: config.github?.repo
+    repo: flags?.repo ?? config.github?.repo
   });
 }
 function runDecide(flags, write) {

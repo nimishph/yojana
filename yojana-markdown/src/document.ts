@@ -330,13 +330,20 @@ export function parseDocument(input: string, issue: IssueSink): ParsedDocument |
     let badAttribute = false;
     for (const attribute of draft.attributes) {
       const [key, value = ''] = attribute.split('=', 2);
-      if (key === 'beads' && value !== '') {
+      if (
+        (key === 'beads' ||
+          key === 'bead' ||
+          key === 'issues' ||
+          key === 'issue' ||
+          key === 'work') &&
+        value !== ''
+      ) {
         workItems = value.split(',').filter((b) => b !== '');
       } else {
         issue(
           draft.line,
           'INVALID_REQUIREMENT_ATTRIBUTE',
-          `"${attribute}" is not understood; known: beads=<id>[,<id>...]`,
+          `"${attribute}" is not understood; known: beads=<id>, issue=<id>, or work=<id>[,<id>...]`,
         );
         badAttribute = true;
       }
@@ -374,13 +381,20 @@ export function parseDocument(input: string, issue: IssueSink): ParsedDocument |
       let badActionAttr = false;
       for (const attr of actDraft.attributes) {
         const [key, value = ''] = attr.split('=', 2);
-        if ((key === 'bead' || key === 'beads') && value !== '') {
+        if (
+          (key === 'bead' ||
+            key === 'beads' ||
+            key === 'issue' ||
+            key === 'issues' ||
+            key === 'work') &&
+          value !== ''
+        ) {
           actionWorkItems = value.split(',').filter((b) => b !== '');
         } else {
           issue(
             actDraft.line,
             'INVALID_ACTION_ATTRIBUTE',
-            `"${attr}" is not understood; known: bead=<id> or beads=<id>[,<id>...]`,
+            `"${attr}" is not understood; known: bead=<id>, issue=<id>, or work=<id>[,<id>...]`,
           );
           badActionAttr = true;
         }

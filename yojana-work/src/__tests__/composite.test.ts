@@ -56,20 +56,32 @@ function mockAdapter(
 describe('CompositeWorkLink', () => {
   test('routes IDs by shape and combines in requested order', async () => {
     const bd = mockAdapter('bd', { 'yoj-100': 'open' });
-    const github = mockAdapter('github', { '#42': 'closed', '105': 'open' });
+    const github = mockAdapter('github', {
+      '#42': 'closed',
+      '105': 'open',
+      'cli/cli#100': 'closed',
+    });
     const checklist = mockAdapter('checklist', { 'req-auth': 'in-progress', 'act-jwt': 'open' });
 
     const composite = new CompositeWorkLink({
       adapters: { bd, github, checklist },
     });
 
-    const lookup = await composite.get(['#42', 'yoj-100', 'req-auth', '105', 'nonexistent']);
+    const lookup = await composite.get([
+      '#42',
+      'yoj-100',
+      'cli/cli#100',
+      'req-auth',
+      '105',
+      'nonexistent',
+    ]);
     expect(lookup.ok).toBe(true);
     if (!lookup.ok) return;
 
     expect(lookup.items).toEqual([
       { id: '#42', title: 'github:#42', state: 'closed' },
       { id: 'yoj-100', title: 'bd:yoj-100', state: 'open' },
+      { id: 'cli/cli#100', title: 'github:cli/cli#100', state: 'closed' },
       { id: 'req-auth', title: 'checklist:req-auth', state: 'in-progress' },
       { id: '105', title: 'github:105', state: 'open' },
       { id: 'nonexistent', title: '', state: 'missing' },

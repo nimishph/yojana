@@ -38,9 +38,10 @@ export function parsePlan(source: string, input: string): ParseResult {
   }
 
   let workItems: string[] = [];
-  if (meta.beads !== undefined) {
-    if (Array.isArray(meta.beads) && meta.beads.every((b) => typeof b === 'string')) {
-      workItems = meta.beads.map((b: string) => b.trim());
+  const rawWork = meta.beads ?? meta.issues ?? meta.work;
+  if (rawWork !== undefined) {
+    if (Array.isArray(rawWork) && rawWork.every((b) => typeof b === 'string')) {
+      workItems = rawWork.map((b: string) => b.trim());
     } else {
       issue(2, 'INVALID_BEADS', '`beads` must be a list of bead ids');
     }

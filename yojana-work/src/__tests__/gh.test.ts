@@ -285,4 +285,42 @@ describe('GhWorkLink.create', () => {
       error: 'gh issue create failed (exit 1): Failed to create issue: title cannot be blank',
     });
   });
+
+  test('supports owner/repo#number syntax and adds -R flag', async () => {
+    const seen: string[][] = [];
+    const gh = new GhWorkLink(
+      runner(
+        {
+          'issue view 100': JSON.stringify({
+            number: 100,
+            title: 'start on a manpage',
+            state: 'CLOSED',
+          }),
+        },
+        seen,
+      ),
+    );
+
+    const lookup = await gh.get(['cli/cli#100']);
+    expect(lookup.ok).toBe(true);
+    if (!lookup.ok) return;
+
+    expect(lookup.items).toEqual([
+      {
+        id: 'cli/cli#100',
+        title: 'start on a manpage',
+        state: 'closed',
+        rawState: 'CLOSED',
+      },
+    ]);
+    expect(seen[0]).toEqual([
+      'issue',
+      'view',
+      '100',
+      '--json',
+      'number,title,state,stateReason,body,subIssues',
+      '-R',
+      'cli/cli',
+    ]);
+  });
 });

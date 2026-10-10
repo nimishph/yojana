@@ -48,6 +48,21 @@ function normalizeId(id: string): string {
   return id;
 }
 
+function parseTarget(
+  id: string,
+  defaultRepo?: string,
+): { target: string; repo?: string | undefined } {
+  const urlMatch = id.match(/^https?:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)$/i);
+  if (urlMatch !== null && urlMatch[1] !== undefined && urlMatch[2] !== undefined) {
+    return { repo: urlMatch[1], target: urlMatch[2] };
+  }
+  const repoMatch = id.match(/^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)$/);
+  if (repoMatch !== null && repoMatch[1] !== undefined && repoMatch[2] !== undefined) {
+    return { repo: repoMatch[1], target: repoMatch[2] };
+  }
+  return { repo: defaultRepo, target: normalizeId(id) };
+}
+
 /**
  * WorkLinkPort for GitHub Issues via `gh` CLI.
  *
@@ -74,7 +89,7 @@ export class GhWorkLink implements WorkLinkPort {
 
     const lookups = await Promise.all(
       ids.map(async (id) => {
-        const target = normalizeId(id);
+        const { target, repo } = parseTarget(id, this.#repo);
         const args = [
           'issue',
           'view',
@@ -82,7 +97,7 @@ export class GhWorkLink implements WorkLinkPort {
           '--json',
           'number,title,state,stateReason,body,subIssues',
         ];
-        if (this.#repo !== undefined) args.push('-R', this.#repo);
+        if (repo !== undefined) args.push('-R', repo);
 
         let result: RunResult;
         try {
@@ -123,6 +138,9 @@ export class GhWorkLink implements WorkLinkPort {
           found.set(id, item);
           found.set(num, item);
           found.set(`#${num}`, item);
+          if (repo !== undefined) {
+            found.set(`${repo}#${num}`, item);
+          }
           return { ok: true as const };
         } catch {
           const text = (result.stderr || result.stdout).trim();
@@ -146,7 +164,7 @@ export class GhWorkLink implements WorkLinkPort {
   }
 
   async children(id: string): Promise<WorkLookup> {
-    const target = normalizeId(id);
+    const { target, repo } = parseTarget(id, this.#repo);
     const args = [
       'issue',
       'view',
@@ -154,7 +172,7 @@ export class GhWorkLink implements WorkLinkPort {
       '--json',
       'number,title,state,stateReason,body,subIssues',
     ];
-    if (this.#repo !== undefined) args.push('-R', this.#repo);
+    if (repo !== undefined) args.push('-R', repo);
 
     let result: RunResult;
     try {
@@ -228,18 +246,18 @@ export class GhWorkLink implements WorkLinkPort {
   }
 
   async close(id: string, reason: string): Promise<WorkChange> {
-    const target = normalizeId(id);
+    const { target, repo } = parseTarget(id, this.#repo);
     const args = ['issue', 'close', target];
     if (reason) args.push('--comment', reason);
-    if (this.#repo !== undefined) args.push('-R', this.#repo);
+    if (repo !== undefined) args.push('-R', repo);
     return this.#change('close', target, args);
   }
 
   async reopen(id: string, reason: string): Promise<WorkChange> {
-    const target = normalizeId(id);
+    const { target, repo } = parseTarget(id, this.#repo);
     const args = ['issue', 'reopen', target];
     if (reason) args.push('--comment', reason);
-    if (this.#repo !== undefined) args.push('-R', this.#repo);
+    if (repo !== undefined) args.push('-R', repo);
     return this.#change('reopen', target, args);
   }
 
@@ -248,11 +266,15 @@ export class GhWorkLink implements WorkLinkPort {
     readonly parent?: string | undefined;
     readonly description?: string | undefined;
   }): Promise<WorkCreateResult> {
+    const { repo: parentRepo, target: parentTarget } = options.parent
+      ? parseTarget(options.parent, this.#repo)
+      : { repo: this.#repo, target: undefined };
+    const repo = parentRepo ?? this.#repo;
     const args = ['issue', 'create', '--title', options.title];
     if (options.description) args.push('--body', options.description);
     else args.push('--body', '');
-    if (options.parent !== undefined) args.push('--parent', normalizeId(options.parent));
-    if (this.#repo !== undefined) args.push('-R', this.#repo);
+    if (parentTarget !== undefined) args.push('--parent', parentTarget);
+    if (repo !== undefined) args.push('-R', repo);
 
     let result: RunResult;
     try {

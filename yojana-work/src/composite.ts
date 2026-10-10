@@ -23,7 +23,8 @@ export interface CompositeWorkLinkOptions {
   readonly default?: WorkLinkPort | undefined;
 }
 
-const GITHUB_ID_PATTERN = /^(?:#\d+|\d+|gh-\d+|gh#\d+)$/i;
+const GITHUB_ID_PATTERN =
+  /^(?:#\d+|\d+|gh-\d+|gh#\d+|[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#\d+|https?:\/\/github\.com\/.+)$/i;
 const BEAD_ID_PATTERN = /^[a-z0-9]+-[a-z0-9]+(?:\.[a-z0-9]+)*$/i;
 const CHECKLIST_ID_PATTERN = /^(?:req|act)-/i;
 

@@ -164,6 +164,7 @@ interface Flags {
   readonly decline: string | undefined;
   readonly dryRun: boolean;
   readonly tracker: string | undefined;
+  readonly repo: string | undefined;
   readonly positional: readonly string[];
 }
 
@@ -196,6 +197,7 @@ function parseFlags(argv: readonly string[]): Flags {
     decline: undefined as string | undefined,
     dryRun: false,
     tracker: undefined as string | undefined,
+    repo: undefined as string | undefined,
     positional: [] as string[],
   };
   for (let i = 0; i < argv.length; i++) {
@@ -224,6 +226,7 @@ function parseFlags(argv: readonly string[]): Flags {
     else if (arg === '--finalize') flags.finalize = value();
     else if (arg === '--decline') flags.decline = value();
     else if (arg === '--tracker' || arg === '--worklink') flags.tracker = value();
+    else if (arg === '--repo') flags.repo = value();
     else if (arg === '--port') {
       const port = Number(value());
       if (!Number.isInteger(port) || port < 0 || port > MAX_PORT) {
@@ -638,7 +641,7 @@ function worklink(root: string, flags?: Flags): WorkLinkPort {
     type,
     root,
     plansDir,
-    repo: config.github?.repo,
+    repo: flags?.repo ?? config.github?.repo,
   });
 }
 
