@@ -1,8 +1,8 @@
 // @bun
 // cli/src/main.ts
-import { existsSync as existsSync9, mkdirSync as mkdirSync5, readFileSync as readFileSync7, writeFileSync as writeFileSync3 } from "fs";
+import { existsSync as existsSync11, mkdirSync as mkdirSync5, readFileSync as readFileSync8, writeFileSync as writeFileSync4 } from "fs";
 import { homedir as homedir2, userInfo } from "os";
-import { join as join9, relative as relative3, resolve as resolve2, sep as sep3 } from "path";
+import { join as join11, relative as relative3, resolve as resolve2, sep as sep3 } from "path";
 // node_modules/.bun/@cntxt-labs+patra-core@.+vendor+patra+cntxt-labs-patra-core-0.0.0.tgz/node_modules/@cntxt-labs/patra-core/src/errors.ts
 class PatraError extends Error {
   code;
@@ -7516,6 +7516,710 @@ class BdWorkLink {
     }
   }
 }
+// yojana-work/src/checklist.ts
+import { existsSync as existsSync7, readdirSync as readdirSync2, readFileSync as readFileSync6, writeFileSync as writeFileSync3 } from "fs";
+import { join as join8 } from "path";
+var REQUIREMENT_HEADING2 = /^##\s+(?:(ADDED|MODIFIED|REMOVED)\s+)?(?:Requirement:\s*)?(.*?)\s*(?:\{#([^}]*)\})?\s*$/i;
+var ACTIONS_HEADING2 = /^###\s+Actions\s*$/i;
+var CHECKLIST_OR_ACTION_ITEM = /^([-*])\s+(?:\[([ xX])\]\s+)?(.*?)(?:\s*\{#([^}]*)\})?\s*$/;
+var NEXT_HEADING = /^##\s/;
+function slugify(text) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+class ChecklistWorkLink {
+  name = "checklist";
+  #options;
+  constructor(options = {}) {
+    this.#options = options;
+  }
+  async get(ids) {
+    if (ids.length === 0)
+      return { ok: true, items: [] };
+    let state;
+    try {
+      state = await this.#load();
+    } catch (error) {
+      return { ok: false, error: `could not read checklist markdown files: ${String(error)}` };
+    }
+    const result = [];
+    for (const id of ids) {
+      const item = state.items.get(id);
+      if (item !== undefined) {
+        result.push({
+          id,
+          title: item.title,
+          state: item.state,
+          rawState: item.rawState
+        });
+        continue;
+      }
+      const req = state.requirements.get(id);
+      if (req !== undefined) {
+        let reqState = "open";
+        let rawState = "open";
+        if (req.items.length > 0) {
+          const closedCount = req.items.filter((i) => i.state === "closed").length;
+          if (closedCount === req.items.length) {
+            reqState = "closed";
+            rawState = "all-done";
+          } else if (closedCount > 0) {
+            reqState = "in-progress";
+            rawState = `${closedCount}/${req.items.length} done`;
+          } else {
+            reqState = "open";
+            rawState = `0/${req.items.length} done`;
+          }
+        }
+        result.push({
+          id,
+          title: req.title,
+          state: reqState,
+          rawState
+        });
+        continue;
+      }
+      result.push({ id, title: "", state: "missing" });
+    }
+    return { ok: true, items: result };
+  }
+  async children(id) {
+    let state;
+    try {
+      state = await this.#load();
+    } catch (error) {
+      return { ok: false, error: `could not read checklist markdown files: ${String(error)}` };
+    }
+    const req = state.requirements.get(id);
+    if (req !== undefined) {
+      return {
+        ok: true,
+        items: req.items.map((i) => ({
+          id: i.id,
+          title: i.title,
+          state: i.state,
+          rawState: i.rawState
+        }))
+      };
+    }
+    return { ok: true, items: [] };
+  }
+  async close(id, _reason) {
+    return this.#toggle(id, true);
+  }
+  async reopen(id, _reason) {
+    return this.#toggle(id, false);
+  }
+  async create(options) {
+    let state;
+    try {
+      state = await this.#load();
+    } catch (error) {
+      return { ok: false, error: `could not read checklist markdown files: ${String(error)}` };
+    }
+    let targetReq;
+    if (options.parent !== undefined) {
+      targetReq = state.requirements.get(options.parent);
+      if (targetReq === undefined) {
+        return { ok: false, error: `checklist has no requirement parent ${options.parent}` };
+      }
+    } else {
+      const first = state.requirements.values().next().value;
+      if (first === undefined) {
+        return { ok: false, error: "no requirements found in checklist plan files" };
+      }
+      targetReq = first;
+    }
+    const content = await this.#read(targetReq.filePath);
+    const lines = content.split(`
+`);
+    const newId = `act-${slugify(options.title) || Date.now().toString(36)}`;
+    const lineToInsert = `- [ ] ${options.title} {#${newId}}`;
+    let insertIndex = targetReq.endLineIndex;
+    if (targetReq.items.length > 0) {
+      const lastItem = targetReq.items[targetReq.items.length - 1];
+      if (lastItem)
+        insertIndex = lastItem.lineIndex + 1;
+    } else if (targetReq.actionsHeadingLineIndex !== undefined) {
+      insertIndex = targetReq.actionsHeadingLineIndex + 1;
+    }
+    lines.splice(insertIndex, 0, lineToInsert);
+    await this.#write(targetReq.filePath, lines.join(`
+`));
+    return { ok: true, id: newId };
+  }
+  async#toggle(id, done) {
+    let state;
+    try {
+      state = await this.#load();
+    } catch (error) {
+      return { ok: false, error: `could not read checklist markdown files: ${String(error)}` };
+    }
+    const item = state.items.get(id);
+    if (item !== undefined) {
+      const content = await this.#read(item.filePath);
+      const lines = content.split(`
+`);
+      const originalLine = lines[item.lineIndex] ?? "";
+      let updatedLine;
+      if (item.hasExplicitCheckbox) {
+        updatedLine = originalLine.replace(/\[[ xX]\]/, done ? "[x]" : "[ ]");
+      } else {
+        updatedLine = originalLine.replace(/^([-*]\s+)/, `$1${done ? "[x]" : "[ ]"} `);
+      }
+      lines[item.lineIndex] = updatedLine;
+      await this.#write(item.filePath, lines.join(`
+`));
+      return { ok: true };
+    }
+    const req = state.requirements.get(id);
+    if (req !== undefined) {
+      if (req.items.length === 0)
+        return { ok: true };
+      const content = await this.#read(req.filePath);
+      const lines = content.split(`
+`);
+      for (const reqItem of req.items) {
+        const line = lines[reqItem.lineIndex] ?? "";
+        let updatedLine;
+        if (reqItem.hasExplicitCheckbox) {
+          updatedLine = line.replace(/\[[ xX]\]/, done ? "[x]" : "[ ]");
+        } else {
+          updatedLine = line.replace(/^([-*]\s+)/, `$1${done ? "[x]" : "[ ]"} `);
+        }
+        lines[reqItem.lineIndex] = updatedLine;
+      }
+      await this.#write(req.filePath, lines.join(`
+`));
+      return { ok: true };
+    }
+    return { ok: false, error: `checklist has no item ${id}` };
+  }
+  async#load() {
+    const filePaths = await this.#discoverFiles();
+    const requirements = new Map;
+    const items = new Map;
+    for (const filePath of filePaths) {
+      const content = await this.#read(filePath);
+      const lines = content.split(`
+`);
+      let currentReq;
+      let actionsHeadingIndex;
+      for (let i = 0;i < lines.length; i++) {
+        const line = lines[i] ?? "";
+        const reqMatch = REQUIREMENT_HEADING2.exec(line);
+        if (reqMatch !== null) {
+          if (currentReq !== undefined) {
+            requirements.set(currentReq.id, {
+              ...currentReq,
+              endLineIndex: i
+            });
+          }
+          const rawTitle = (reqMatch[2] ?? "").trim();
+          const attrStr = reqMatch[3];
+          const [rawId] = (attrStr ?? "").trim().split(/\s+/);
+          const reqId = rawId && rawId !== "" ? rawId : slugify(rawTitle);
+          currentReq = {
+            id: reqId,
+            title: rawTitle,
+            filePath,
+            lineIndex: i,
+            items: [],
+            endLineIndex: lines.length
+          };
+          requirements.set(reqId, currentReq);
+          actionsHeadingIndex = undefined;
+          continue;
+        }
+        if (currentReq !== undefined && NEXT_HEADING.test(line)) {
+          requirements.set(currentReq.id, {
+            ...currentReq,
+            endLineIndex: i
+          });
+          currentReq = undefined;
+          continue;
+        }
+        if (currentReq !== undefined) {
+          if (ACTIONS_HEADING2.test(line)) {
+            actionsHeadingIndex = i;
+            continue;
+          }
+          const itemMatch = CHECKLIST_OR_ACTION_ITEM.exec(line);
+          if (itemMatch !== null) {
+            const hasExplicitCheckbox = itemMatch[2] !== undefined;
+            const isChecked = hasExplicitCheckbox && itemMatch[2]?.toLowerCase() === "x";
+            const itemText = (itemMatch[3] ?? "").trim();
+            const attrStr = itemMatch[4];
+            const [rawId] = (attrStr ?? "").trim().split(/\s+/);
+            const itemIndex = currentReq.items.length + 1;
+            const itemId = rawId && rawId !== "" ? rawId : `${currentReq.id}.${itemIndex}`;
+            const parsedItem = {
+              id: itemId,
+              title: itemText,
+              state: isChecked ? "closed" : "open",
+              rawState: isChecked ? "[x]" : "[ ]",
+              filePath,
+              lineIndex: i,
+              reqId: currentReq.id,
+              hasExplicitCheckbox
+            };
+            currentReq.items.push(parsedItem);
+            items.set(itemId, parsedItem);
+            const textSlug = slugify(itemText);
+            if (textSlug !== "" && !items.has(textSlug)) {
+              items.set(textSlug, parsedItem);
+            }
+          }
+        }
+      }
+      if (currentReq !== undefined) {
+        requirements.set(currentReq.id, {
+          ...currentReq,
+          actionsHeadingLineIndex: actionsHeadingIndex,
+          endLineIndex: lines.length
+        });
+      }
+    }
+    return { requirements, items };
+  }
+  async#discoverFiles() {
+    if (this.#options.files !== undefined && this.#options.files.length > 0) {
+      return this.#options.files;
+    }
+    if (this.#options.listFiles !== undefined) {
+      return this.#options.listFiles();
+    }
+    const dir = this.#options.plansDir ?? "plans";
+    if (!existsSync7(dir))
+      return [];
+    try {
+      const entries = readdirSync2(dir, { withFileTypes: true });
+      return entries.filter((e) => e.isFile() && e.name.endsWith(".md")).map((e) => join8(dir, e.name));
+    } catch {
+      return [];
+    }
+  }
+  async#read(filePath) {
+    if (this.#options.readFile !== undefined) {
+      return this.#options.readFile(filePath);
+    }
+    return readFileSync6(filePath, "utf8");
+  }
+  async#write(filePath, content) {
+    if (this.#options.writeFile !== undefined) {
+      await this.#options.writeFile(filePath, content);
+      return;
+    }
+    writeFileSync3(filePath, content, "utf8");
+  }
+}
+// yojana-work/src/composite.ts
+import { existsSync as existsSync8 } from "fs";
+import { join as join9 } from "path";
+
+// yojana-work/src/gh.ts
+function spawnGh(bin = "gh", cwd) {
+  return async (args) => {
+    const child = Bun.spawn([bin, ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited
+    ]);
+    return { exitCode, stdout, stderr };
+  };
+}
+var NOT_FOUND = /could not resolve to an issue|issue not found|not found|404/i;
+function mapGhState(state, stateReason) {
+  const upper = state.toUpperCase();
+  if (upper === "OPEN")
+    return "open";
+  if (upper === "CLOSED") {
+    if (stateReason?.toUpperCase() === "NOT_PLANNED")
+      return "deferred";
+    return "closed";
+  }
+  return "unknown";
+}
+function normalizeId(id) {
+  if (id.startsWith("#"))
+    return id.slice(1);
+  if (id.startsWith("gh-") || id.startsWith("gh#"))
+    return id.slice(3);
+  return id;
+}
+
+class GhWorkLink {
+  name = "github";
+  #run;
+  #repo;
+  constructor(run, options) {
+    this.#run = run;
+    this.#repo = options?.repo;
+  }
+  async get(ids) {
+    if (ids.length === 0)
+      return { ok: true, items: [] };
+    const found = new Map;
+    const lookups = await Promise.all(ids.map(async (id) => {
+      const target = normalizeId(id);
+      const args = [
+        "issue",
+        "view",
+        target,
+        "--json",
+        "number,title,state,stateReason,body,subIssues"
+      ];
+      if (this.#repo !== undefined)
+        args.push("-R", this.#repo);
+      let result;
+      try {
+        result = await this.#run(args);
+      } catch (error) {
+        return {
+          ok: false,
+          error: `could not run gh (${String(error)}); install it or set GH_BIN`
+        };
+      }
+      if (result.exitCode !== 0) {
+        const text = (result.stderr || result.stdout).trim();
+        if (NOT_FOUND.test(text)) {
+          const missingItem = { id, title: "", state: "missing" };
+          found.set(id, missingItem);
+          found.set(target, missingItem);
+          found.set(`#${target}`, missingItem);
+          return { ok: true };
+        }
+        return {
+          ok: false,
+          error: `gh issue view ${target} failed (exit ${result.exitCode}): ${text}`
+        };
+      }
+      try {
+        const raw = JSON.parse(result.stdout);
+        const num = String(raw.number ?? target);
+        const rawState = String(raw.state ?? "");
+        const state = mapGhState(rawState, raw.stateReason);
+        const item = {
+          id,
+          title: String(raw.title ?? ""),
+          state,
+          rawState
+        };
+        found.set(id, item);
+        found.set(num, item);
+        found.set(`#${num}`, item);
+        return { ok: true };
+      } catch {
+        const text = (result.stderr || result.stdout).trim();
+        return {
+          ok: false,
+          error: `gh did not answer in JSON (exit ${result.exitCode}): ${text}`
+        };
+      }
+    }));
+    const failure = lookups.find((l) => !l.ok);
+    if (failure !== undefined && !failure.ok) {
+      return failure;
+    }
+    return {
+      ok: true,
+      items: ids.map((id) => found.get(id) ?? { id, title: "", state: "missing" })
+    };
+  }
+  async children(id) {
+    const target = normalizeId(id);
+    const args = [
+      "issue",
+      "view",
+      target,
+      "--json",
+      "number,title,state,stateReason,body,subIssues"
+    ];
+    if (this.#repo !== undefined)
+      args.push("-R", this.#repo);
+    let result;
+    try {
+      result = await this.#run(args);
+    } catch (error) {
+      return {
+        ok: false,
+        error: `could not run gh (${String(error)}); install it or set GH_BIN`
+      };
+    }
+    if (result.exitCode !== 0) {
+      const text = (result.stderr || result.stdout).trim();
+      if (NOT_FOUND.test(text)) {
+        return { ok: false, error: `gh has no issue ${id}` };
+      }
+      return {
+        ok: false,
+        error: `gh issue view ${target} failed (exit ${result.exitCode}): ${text}`
+      };
+    }
+    try {
+      const raw = JSON.parse(result.stdout);
+      if (Array.isArray(raw.subIssues) && raw.subIssues.length > 0) {
+        const items = raw.subIssues.map((sub) => {
+          const num = String(sub.number ?? sub.id ?? "");
+          const rawState = String(sub.state ?? "");
+          return {
+            id: `#${num}`,
+            title: String(sub.title ?? ""),
+            state: mapGhState(rawState, sub.stateReason),
+            rawState
+          };
+        });
+        return { ok: true, items };
+      }
+      const body = typeof raw.body === "string" ? raw.body : "";
+      const items = [];
+      const checklistRegex = /^[-*]\s+\[([ xX])\]\s+(?:#?(\d+)\s+)?(.*)$/gm;
+      let match = checklistRegex.exec(body);
+      let index = 1;
+      while (match !== null) {
+        const mark = match[1] ?? " ";
+        const isChecked = mark.toLowerCase() === "x";
+        const issueNum = match[2];
+        const text = match[3]?.trim() ?? "";
+        const childId = issueNum !== undefined ? `#${issueNum}` : `${id}.${index}`;
+        items.push({
+          id: childId,
+          title: text || (issueNum !== undefined ? `Issue #${issueNum}` : `Task ${index}`),
+          state: isChecked ? "closed" : "open",
+          rawState: isChecked ? "CLOSED" : "OPEN"
+        });
+        index++;
+        match = checklistRegex.exec(body);
+      }
+      return { ok: true, items };
+    } catch {
+      const text = (result.stderr || result.stdout).trim();
+      return {
+        ok: false,
+        error: `gh did not answer in JSON (exit ${result.exitCode}): ${text}`
+      };
+    }
+  }
+  async close(id, reason) {
+    const target = normalizeId(id);
+    const args = ["issue", "close", target];
+    if (reason)
+      args.push("--comment", reason);
+    if (this.#repo !== undefined)
+      args.push("-R", this.#repo);
+    return this.#change("close", target, args);
+  }
+  async reopen(id, reason) {
+    const target = normalizeId(id);
+    const args = ["issue", "reopen", target];
+    if (reason)
+      args.push("--comment", reason);
+    if (this.#repo !== undefined)
+      args.push("-R", this.#repo);
+    return this.#change("reopen", target, args);
+  }
+  async create(options) {
+    const args = ["issue", "create", "--title", options.title];
+    if (options.description)
+      args.push("--body", options.description);
+    else
+      args.push("--body", "");
+    if (options.parent !== undefined)
+      args.push("--parent", normalizeId(options.parent));
+    if (this.#repo !== undefined)
+      args.push("-R", this.#repo);
+    let result;
+    try {
+      result = await this.#run(args);
+    } catch (error) {
+      return {
+        ok: false,
+        error: `could not run gh (${String(error)}); install it or set GH_BIN`
+      };
+    }
+    if (result.exitCode !== 0) {
+      const text = (result.stderr || result.stdout).trim();
+      return {
+        ok: false,
+        error: `gh issue create failed (exit ${result.exitCode}): ${text}`
+      };
+    }
+    const output = (result.stdout || result.stderr).trim();
+    const urlMatch = output.match(/\/issues\/(\d+)/);
+    if (urlMatch !== null && urlMatch[1] !== undefined) {
+      return { ok: true, id: `#${urlMatch[1]}` };
+    }
+    if (output.startsWith("{")) {
+      const numMatchJson = output.match(/"number"\s*:\s*(\d+)/);
+      if (numMatchJson !== null && numMatchJson[1] !== undefined) {
+        return { ok: true, id: `#${numMatchJson[1]}` };
+      }
+    }
+    const numMatch = output.match(/#?(\d+)/);
+    if (numMatch !== null && numMatch[1] !== undefined) {
+      return { ok: true, id: `#${numMatch[1]}` };
+    }
+    return {
+      ok: false,
+      error: `gh issue create answered without an issue number: ${output}`
+    };
+  }
+  async#change(verb, target, args) {
+    let result;
+    try {
+      result = await this.#run(args);
+    } catch (error) {
+      return {
+        ok: false,
+        error: `could not run gh (${String(error)}); install it or set GH_BIN`
+      };
+    }
+    if (result.exitCode === 0)
+      return { ok: true };
+    const text = (result.stderr || result.stdout).trim();
+    return {
+      ok: false,
+      error: `gh issue ${verb} ${target} failed (exit ${result.exitCode}): ${text}`
+    };
+  }
+}
+
+// yojana-work/src/composite.ts
+var GITHUB_ID_PATTERN = /^(?:#\d+|\d+|gh-\d+|gh#\d+)$/i;
+var BEAD_ID_PATTERN = /^[a-z0-9]+-[a-z0-9]+(?:\.[a-z0-9]+)*$/i;
+var CHECKLIST_ID_PATTERN = /^(?:req|act)-/i;
+
+class CompositeWorkLink {
+  name = "composite";
+  #adapters;
+  #defaultAdapter;
+  constructor(options) {
+    const map = {};
+    for (const [key, adapter] of Object.entries(options.adapters)) {
+      if (adapter !== undefined) {
+        map[key.toLowerCase()] = adapter;
+      }
+    }
+    this.#adapters = map;
+    this.#defaultAdapter = options.default ?? map.bd ?? map.checklist ?? map.github ?? Object.values(map)[0] ?? new ChecklistWorkLink;
+  }
+  resolveAdapter(id) {
+    if (GITHUB_ID_PATTERN.test(id) && this.#adapters.github) {
+      return this.#adapters.github;
+    }
+    if (CHECKLIST_ID_PATTERN.test(id) && this.#adapters.checklist) {
+      return this.#adapters.checklist;
+    }
+    if (BEAD_ID_PATTERN.test(id) && this.#adapters.bd) {
+      return this.#adapters.bd;
+    }
+    return this.#defaultAdapter;
+  }
+  async get(ids) {
+    if (ids.length === 0)
+      return { ok: true, items: [] };
+    const groups = new Map;
+    for (const id of ids) {
+      const adapter = this.resolveAdapter(id);
+      const list = groups.get(adapter) ?? [];
+      list.push(id);
+      groups.set(adapter, list);
+    }
+    const found = new Map;
+    const lookups = await Promise.all([...groups.entries()].map(async ([adapter, groupIds]) => {
+      const res = await adapter.get(groupIds);
+      if (!res.ok)
+        return res;
+      for (const item of res.items) {
+        found.set(item.id, item);
+      }
+      return { ok: true };
+    }));
+    const failure = lookups.find((l) => !l.ok);
+    if (failure !== undefined && !failure.ok) {
+      return failure;
+    }
+    const missingIds = ids.filter((id) => found.get(id)?.state === "missing");
+    if (missingIds.length > 0) {
+      const otherAdapters = Object.values(this.#adapters);
+      for (const adapter of otherAdapters) {
+        const stillMissing = missingIds.filter((id) => found.get(id)?.state === "missing");
+        if (stillMissing.length === 0)
+          break;
+        const fallbackLookup = await adapter.get(stillMissing);
+        if (fallbackLookup.ok) {
+          for (const item of fallbackLookup.items) {
+            if (item.state !== "missing") {
+              found.set(item.id, item);
+            }
+          }
+        }
+      }
+    }
+    return {
+      ok: true,
+      items: ids.map((id) => found.get(id) ?? { id, title: "", state: "missing" })
+    };
+  }
+  async children(id) {
+    const primary = this.resolveAdapter(id);
+    const result = await primary.children(id);
+    if (result.ok && result.items.length > 0)
+      return result;
+    for (const adapter of Object.values(this.#adapters)) {
+      if (adapter === primary)
+        continue;
+      const alt = await adapter.children(id);
+      if (alt.ok && alt.items.length > 0)
+        return alt;
+    }
+    return result;
+  }
+  async close(id, reason) {
+    const adapter = this.resolveAdapter(id);
+    if (adapter.close !== undefined) {
+      return adapter.close(id, reason);
+    }
+    return { ok: false, error: `${adapter.name} does not support closing items` };
+  }
+  async reopen(id, reason) {
+    const adapter = this.resolveAdapter(id);
+    if (adapter.reopen !== undefined) {
+      return adapter.reopen(id, reason);
+    }
+    return { ok: false, error: `${adapter.name} does not support reopening items` };
+  }
+  async create(options) {
+    const adapter = options.parent ? this.resolveAdapter(options.parent) : this.#defaultAdapter;
+    if (adapter.create !== undefined) {
+      return adapter.create(options);
+    }
+    return { ok: false, error: `${adapter.name} does not support creating items` };
+  }
+}
+function createWorkLink(options = {}) {
+  const root = options.root ?? process.cwd();
+  const bdBin = options.bdBin ?? process.env.BD_BIN ?? "bd";
+  const ghBin = options.ghBin ?? process.env.GH_BIN ?? "gh";
+  const plansDir = options.plansDir ?? join9(root, "plans");
+  const bd = new BdWorkLink(spawnBd(bdBin, root));
+  const github = new GhWorkLink(spawnGh(ghBin, root), { repo: options.repo });
+  const checklist = new ChecklistWorkLink({ plansDir });
+  const type = options.type ?? "auto";
+  if (type === "bd")
+    return bd;
+  if (type === "github" || type === "gh")
+    return github;
+  if (type === "checklist" || type === "markdown")
+    return checklist;
+  const hasBeads = existsSync8(join9(root, ".beads"));
+  const defaultAdapter = hasBeads ? bd : checklist;
+  return new CompositeWorkLink({
+    adapters: { bd, github, checklist },
+    default: defaultAdapter
+  });
+}
 // claude-plugin/skills/yojana/SKILL.md
 var SKILL_default = `---
 name: yojana
@@ -7687,6 +8391,15 @@ then run \`yojana config\` to confirm it reads. Every key is optional:
 - Unknown keys and bad values are refused (\`CONFIG_INVALID\`), not ignored. A running
   \`review --serve\` keeps its theme; restart it to see changes.
 
+## Work Trackers: bd, GitHub Issues, and Markdown Checklists
+
+Work items and action progress come from \`WorkLinkPort\` adapters:
+- **bd (beads)**: local Dolt-backed issue tracking (\`bd show\`, \`bd list\`, \`bd create\`, \`bd close/reopen\`). Default when \`.beads/\` is present.
+- **github (via gh CLI)**: GitHub Issues (\`#123\`, \`gh#123\`, \`123\`). Reads states, sub-issues, and tasklists; closes/reopens via \`gh issue close/reopen\`.
+- **checklist (plain Markdown)**: No external tools required! Checklist items under requirements (\`- [x]\` vs \`- [ ]\`) automatically measure progress. \`- [x]\` items count as done (closed). Toggling \`close\`/\`reopen\` updates the checkboxes in the plan files directly.
+
+Select a tracker with \`--tracker <bd|github|checklist|auto>\` or in \`yojana.config.json\` via \`"tracker": "github"\` or \`"tracker": "checklist"\`. Auto-detection routes by ID shape and workspace setup.
+
 ## When claims and work disagree
 
 \`yojana status --check\` flags two mismatches. **close?**: every claim holds but a linked bead
@@ -7695,7 +8408,7 @@ person, and propose reopening or fix the code.
 `;
 
 // cli/src/config.ts
-import { existsSync as existsSync7, readFileSync as readFileSync6 } from "fs";
+import { existsSync as existsSync9, readFileSync as readFileSync7 } from "fs";
 import { homedir } from "os";
 import { dirname as dirname2, resolve } from "path";
 var FONT_ROLES = ["reading", "ui", "mono"];
@@ -7705,7 +8418,9 @@ var EMPTY = {
   vars: {},
   home: undefined,
   theme: { css: undefined, fonts: {}, tokens: {}, dark: {} },
-  verifiers: []
+  verifiers: [],
+  tracker: undefined,
+  github: undefined
 };
 var TOKEN_NAME = /^[a-z][a-z0-9-]*$/;
 var VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -7715,15 +8430,24 @@ function loadConfig(env = process.env) {
   if (named === undefined || named === "")
     return EMPTY;
   const path = resolve(named);
-  if (!existsSync7(path))
+  if (!existsSync9(path))
     return { ...EMPTY, path };
   let raw;
   try {
-    raw = JSON.parse(readFileSync6(path, "utf8"));
+    raw = JSON.parse(readFileSync7(path, "utf8"));
   } catch (cause) {
     throw invalid2(path, `is not JSON: ${cause.message}`);
   }
-  const top = record(path, raw, "the file", ["vars", "home", "theme", "verifiers", "adapters"]);
+  const top = record(path, raw, "the file", [
+    "vars",
+    "home",
+    "theme",
+    "verifiers",
+    "adapters",
+    "tracker",
+    "worklink",
+    "github"
+  ]);
   const vars = {};
   for (const [name, value] of Object.entries(record(path, top.vars ?? {}, "vars"))) {
     if (!VAR_NAME.test(name))
@@ -7733,7 +8457,7 @@ function loadConfig(env = process.env) {
   const home = top.home === undefined ? undefined : expandPath(path, text(path, top.home, "home"), vars, env);
   const theme = record(path, top.theme ?? {}, "theme", ["css", "fonts", "tokens", "dark"]);
   const css = theme.css === undefined ? undefined : expandPath(path, text(path, theme.css, "theme.css"), vars, env);
-  if (css !== undefined && !existsSync7(css))
+  if (css !== undefined && !existsSync9(css))
     throw invalid2(path, `theme.css: no file at ${css}`);
   const fonts = {};
   for (const [role, value] of Object.entries(record(path, theme.fonts ?? {}, "theme.fonts", FONT_ROLES))) {
@@ -7773,6 +8497,14 @@ function loadConfig(env = process.env) {
     ]));
     verifiers.push({ name, command, args, kinds, env: customEnv });
   }
+  const tracker = top.tracker !== undefined ? text(path, top.tracker, "tracker") : top.worklink !== undefined ? text(path, top.worklink, "worklink") : undefined;
+  let githubConfig;
+  if (top.github !== undefined) {
+    const rawGithub = record(path, top.github, "github", ["repo"]);
+    githubConfig = {
+      repo: rawGithub.repo !== undefined ? text(path, rawGithub.repo, "github.repo") : undefined
+    };
+  }
   return {
     path,
     found: true,
@@ -7784,15 +8516,17 @@ function loadConfig(env = process.env) {
       tokens: tokens2(path, theme.tokens, "theme.tokens"),
       dark: tokens2(path, theme.dark, "theme.dark")
     },
-    verifiers
+    verifiers,
+    tracker,
+    github: githubConfig
   };
 }
 function themeStylesheet(config, defaultThemeFile, env = process.env) {
   const parts = [];
   const extra = env.YOJANA_THEME_CSS;
   if (extra)
-    parts.push(readFileSync6(extra, "utf8"));
-  parts.push(readFileSync6(config.theme.css ?? defaultThemeFile, "utf8"));
+    parts.push(readFileSync7(extra, "utf8"));
+  parts.push(readFileSync7(config.theme.css ?? defaultThemeFile, "utf8"));
   const light = {
     ...Object.fromEntries(Object.entries(config.theme.fonts).map(([r, v]) => [`font-${r}`, v])),
     ...config.theme.tokens
@@ -7873,8 +8607,8 @@ function invalid2(file, message) {
 }
 
 // cli/src/serve.ts
-import { existsSync as existsSync8 } from "fs";
-import { join as join8 } from "path";
+import { existsSync as existsSync10 } from "fs";
+import { join as join10 } from "path";
 
 // node_modules/.bun/@cntxt-labs+patra-serve@..+vendor+patra+cntxt-labs-patra-serve-0.0.0.tgz/node_modules/@cntxt-labs/patra-serve/src/runtime.ts
 var RUNTIME_SCRIPT = String.raw`
@@ -8437,10 +9171,10 @@ ${lines}`)}</pre>`, 500);
 }
 // cli/src/serve.ts
 function templateDir(name) {
-  const bundled = join8(import.meta.dir, name);
-  if (existsSync8(bundled))
+  const bundled = join10(import.meta.dir, name);
+  if (existsSync10(bundled))
     return bundled;
-  return join8(import.meta.dir, "..", "..", "templates", name);
+  return join10(import.meta.dir, "..", "..", "templates", name);
 }
 function reviewTemplate() {
   const loaded = loadTemplate(templateDir(REVIEW_TEMPLATE));
@@ -8524,6 +9258,7 @@ Options:
   --strict           check: also fail when a claim cannot be verified
   --check            status: also run the claim checks
   --stale-days <n>   status: an open change older than this is stale (default 14)
+  --tracker <type>   work tracker adapter: bd, github, checklist, or composite (default: auto)
 
 An agent (YOJANA_AGENT set, YOJANA_ACTOR not) proposes; only a person finalizes or declines a
 status change or approves a requirement. When an agent ingests, a changed status line becomes a
@@ -8536,8 +9271,8 @@ printed as {"error": {"code", "message", "hint"}}.
 YOJANA_CONFIG names a yojana.config.json (paths, fonts, theme tokens, a theme file) that review
 pages use; the Claude Code plugin keeps one in its data folder.
 
-Claims run through anvesa (wql, dependents) and progress through bd; set ANVESA_BIN or BD_BIN if
-they are not on PATH.
+Claims run through anvesa (wql, dependents) and progress through bd, GitHub Issues (gh), or
+plain-Markdown checklists; set ANVESA_BIN, BD_BIN, or GH_BIN if they are not on PATH.
 `;
 var DEFAULT_STALE_DAYS = 14;
 var DEFAULT_PORT = 4317;
@@ -8570,6 +9305,7 @@ function parseFlags(argv) {
     finalize: undefined,
     decline: undefined,
     dryRun: false,
+    tracker: undefined,
     positional: []
   };
   for (let i = 0;i < argv.length; i++) {
@@ -8616,6 +9352,8 @@ function parseFlags(argv) {
       flags.finalize = value();
     else if (arg === "--decline")
       flags.decline = value();
+    else if (arg === "--tracker" || arg === "--worklink")
+      flags.tracker = value();
     else if (arg === "--port") {
       const port = Number(value());
       if (!Number.isInteger(port) || port < 0 || port > MAX_PORT) {
@@ -8809,7 +9547,7 @@ function runArchive(flags, write) {
       changeId,
       actor: actor(),
       planFiles: loadPlanFiles(flags.root, ws.plansDir),
-      writePlan: (source, text) => writeFileSync3(join9(flags.root, source), text)
+      writePlan: (source, text) => writeFileSync4(join11(flags.root, source), text)
     });
     const lines = [`${changeId}  ${result.outcome}`];
     lines.push(...describeProblems(result.problems));
@@ -8943,8 +9681,16 @@ function runRemoveComment(flags, write) {
     return 0;
   });
 }
-function worklink(root) {
-  return new BdWorkLink(spawnBd(process.env.BD_BIN ?? "bd", root));
+function worklink(root, flags) {
+  const config = loadConfig();
+  const type = flags?.tracker ?? process.env.YOJANA_TRACKER ?? config.tracker ?? "auto";
+  const plansDir = flags?.plans ?? (config.home ? join11(config.home, "plans") : undefined);
+  return createWorkLink({
+    type,
+    root,
+    plansDir,
+    repo: config.github?.repo
+  });
 }
 function runDecide(flags, write) {
   const [planId, requirement, item, decision] = flags.positional;
@@ -8968,7 +9714,7 @@ function runDecide(flags, write) {
       return 1;
     }
     const d = result.decision;
-    const next = d.status === "recorded" ? "proposed; a person finalizes it on the review page or with yojana decisions --finalize" : `${d.status}; yojana decisions --apply runs it through ${worklink(flags.root).name}`;
+    const next = d.status === "recorded" ? "proposed; a person finalizes it on the review page or with yojana decisions --finalize" : `${d.status}; yojana decisions --apply runs it through ${worklink(flags.root, flags).name}`;
     emit(flags, write, result, `${d.id}  ${d.decision} ${d.item}: ${next}
 `);
     return 0;
@@ -8986,7 +9732,7 @@ async function settleProposal(flags, write, ws, result) {
     parser: ws.parser,
     bases: ws.bases,
     files: loadPlanFiles(flags.root, ws.plansDir),
-    writePlan: (source, text) => writeFileSync3(join9(flags.root, source), text),
+    writePlan: (source, text) => writeFileSync4(join11(flags.root, source), text),
     proposal: p
   });
   const what = p.status === "accepted" ? `${p.planId} moved to ${p.to}` : p.status === "declined" ? `declined; ${p.planId} stays as it is` : `proposed ${p.planId} -> ${p.to}; a person finalizes it on the review page or with yojana decisions --finalize ${p.id}`;
@@ -9040,7 +9786,7 @@ function runDecisions(flags, write) {
     if (flags.apply) {
       const applied = await applyDecisions({
         store: ws.store,
-        worklink: worklink(flags.root),
+        worklink: worklink(flags.root, flags),
         actor: actor()
       });
       const lines = applied.map((a) => `${a.id}  ${a.outcome}: ${a.note}
@@ -9134,7 +9880,7 @@ async function runServe(flags, write) {
     actor: person(),
     runCheck: flags.runCheck,
     verifiers: () => verifiers(flags.root),
-    worklink: () => worklink(flags.root)
+    worklink: () => worklink(flags.root, flags)
   });
   const plans = await server.plans();
   write(`review server on ${server.url} (this machine only); stop it with Ctrl+C
@@ -9168,7 +9914,7 @@ function runReview(flags, write) {
       changesDir: flags.changes,
       runCheck: flags.runCheck,
       verifiers: () => verifiers(flags.root),
-      worklink: () => worklink(flags.root),
+      worklink: () => worklink(flags.root, flags),
       you: person(),
       mode: "read"
     });
@@ -9195,9 +9941,9 @@ function runReview(flags, write) {
         throw new YojanaError("TEMPLATE_INVALID", page.problems.map((p) => `${p.at} ${p.message}`).join("; "));
       }
       const name = planId.split("/").at(-1) ?? planId;
-      const out = flags.out !== undefined && planIds.length === 1 ? resolve2(flags.root, flags.out) : join9(flags.root, ".yojana", "review", `${name}.html`);
-      mkdirSync5(join9(out, ".."), { recursive: true });
-      writeFileSync3(out, page.html);
+      const out = flags.out !== undefined && planIds.length === 1 ? resolve2(flags.root, flags.out) : join11(flags.root, ".yojana", "review", `${name}.html`);
+      mkdirSync5(join11(out, ".."), { recursive: true });
+      writeFileSync4(out, page.html);
       written.push(toSource(flags.root, out));
     }
     emit(flags, write, { written }, `${written.map((w) => `wrote ${w}`).join(`
@@ -9249,10 +9995,10 @@ function runSkill(flags, write) {
   if (flags.positional[0] !== "install") {
     throw new YojanaError("CLI_USAGE", "usage: yojana skill install [--global | --dir <skills dir>]");
   }
-  const skills = flags.dir === undefined ? join9(flags.global ? homedir2() : flags.root, ".claude", "skills") : resolve2(flags.root, flags.dir);
-  const target = join9(skills, "yojana", "SKILL.md");
-  mkdirSync5(join9(skills, "yojana"), { recursive: true });
-  writeFileSync3(target, SKILL_default);
+  const skills = flags.dir === undefined ? join11(flags.global ? homedir2() : flags.root, ".claude", "skills") : resolve2(flags.root, flags.dir);
+  const target = join11(skills, "yojana", "SKILL.md");
+  mkdirSync5(join11(skills, "yojana"), { recursive: true });
+  writeFileSync4(target, SKILL_default);
   emit(flags, write, { installed: target }, `installed the yojana skill: ${target}
 `);
   return 0;
@@ -9279,12 +10025,12 @@ function describeActionsSync(report) {
 function runActionsSync(flags, write) {
   const [, planId] = flags.positional;
   return withWorkspace(flags, async (ws) => {
-    const wl = worklink(flags.root);
+    const wl = worklink(flags.root, flags);
     const report = await syncActions({
       parser: ws.parser,
       worklink: wl,
       files: loadPlanFiles(flags.root, ws.plansDir),
-      writePlan: (source, text) => writeFileSync3(join9(flags.root, source), text),
+      writePlan: (source, text) => writeFileSync4(join11(flags.root, source), text),
       dryRun: flags.dryRun,
       planId
     });
@@ -9330,7 +10076,7 @@ function runRulesPropose(flags, write) {
       verifiers: verifiers(flags.root),
       planId
     });
-    const wl = worklink(flags.root);
+    const wl = worklink(flags.root, flags);
     const medhaBin = process.env.MEDHA_BIN ?? "medha";
     const ruleSink = new MedhaRuleSink(spawnMedha(medhaBin, flags.root));
     const report = await proposeRules({
@@ -9372,11 +10118,11 @@ function runInit(flags, write) {
   const plansDir = resolve2(flags.root, flags.plans ?? "plans");
   mkdirSync5(plansDir, { recursive: true });
   mkdirSync5(resolve2(flags.root, flags.changes ?? "changes"), { recursive: true });
-  const starter = join9(plansDir, "getting-started.md");
+  const starter = join11(plansDir, "getting-started.md");
   const starterSource = toSource(flags.root, starter);
   const wrote = flags.force || loadPlanFiles(flags.root, plansDir).length === 0;
   if (wrote)
-    writeFileSync3(starter, STARTER_PLAN);
+    writeFileSync4(starter, STARTER_PLAN);
   const lines = [
     "yojana is set up: .yojana/ holds the log (commit it).",
     wrote ? `  wrote ${starterSource}, a starter plan to edit or delete` : `  kept your plans; --force writes ${starterSource} anyway`,
@@ -9394,17 +10140,17 @@ function runImport(flags, write) {
     throw new YojanaError("CLI_USAGE", "usage: yojana import <file> --id <plan-id>");
   }
   const from = resolve2(flags.root, file);
-  if (!existsSync9(from))
+  if (!existsSync11(from))
     throw new YojanaError("FILE_NOT_FOUND", `cannot read ${file}`);
   const name = flags.id.split("/").at(-1) ?? flags.id;
-  const out = resolve2(flags.root, flags.out ?? join9(flags.plans ?? "plans", `${name}.md`));
+  const out = resolve2(flags.root, flags.out ?? join11(flags.plans ?? "plans", `${name}.md`));
   const outSource = toSource(flags.root, out);
-  if (existsSync9(out) && !flags.force) {
+  if (existsSync11(out) && !flags.force) {
     throw new YojanaError("FILE_EXISTS", `${outSource} already exists`, {
       hint: "choose another --out, or pass --force to replace it"
     });
   }
-  const { report, issues } = importAndValidate(readFileSync7(from, "utf8"), {
+  const { report, issues } = importAndValidate(readFileSync8(from, "utf8"), {
     source: toSource(flags.root, from),
     planId: flags.id,
     prefix: flags.prefix
@@ -9417,8 +10163,8 @@ ${lines.join(`
 `);
     return 1;
   }
-  mkdirSync5(join9(out, ".."), { recursive: true });
-  writeFileSync3(out, report.markdown);
+  mkdirSync5(join11(out, ".."), { recursive: true });
+  writeFileSync4(out, report.markdown);
   const prefix = report.prefix === undefined ? "no bead ids found" : `bead prefix ${report.prefix.value}${report.prefix.detected ? " (detected; --prefix to change)" : ""}`;
   const lines = [
     `${outSource}  ${report.title}`,
@@ -9451,7 +10197,7 @@ function runRefresh(flags, write) {
       parser: ws.parser,
       bases: ws.bases,
       files: loadPlanFiles(flags.root, ws.plansDir),
-      writePlan: (source, text) => writeFileSync3(join9(flags.root, source), text)
+      writePlan: (source, text) => writeFileSync4(join11(flags.root, source), text)
     });
     const lines = report.files.length === 0 ? ["every plan file is up to date with the log"] : report.files.flatMap((f) => {
       const what = [
@@ -9553,7 +10299,7 @@ function runStatus(flags, write) {
       parser: ws.parser,
       bases: ws.bases,
       files: loadPlanFiles(flags.root, ws.plansDir),
-      worklink: new BdWorkLink(spawnBd(process.env.BD_BIN ?? "bd", flags.root)),
+      worklink: worklink(flags.root, flags),
       checks,
       now: Date.now(),
       staleDays: flags.staleDays,

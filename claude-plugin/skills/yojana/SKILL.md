@@ -168,6 +168,15 @@ then run `yojana config` to confirm it reads. Every key is optional:
 - Unknown keys and bad values are refused (`CONFIG_INVALID`), not ignored. A running
   `review --serve` keeps its theme; restart it to see changes.
 
+## Work Trackers: bd, GitHub Issues, and Markdown Checklists
+
+Work items and action progress come from `WorkLinkPort` adapters:
+- **bd (beads)**: local Dolt-backed issue tracking (`bd show`, `bd list`, `bd create`, `bd close/reopen`). Default when `.beads/` is present.
+- **github (via gh CLI)**: GitHub Issues (`#123`, `gh#123`, `123`). Reads states, sub-issues, and tasklists; closes/reopens via `gh issue close/reopen`.
+- **checklist (plain Markdown)**: No external tools required! Checklist items under requirements (`- [x]` vs `- [ ]`) automatically measure progress. `- [x]` items count as done (closed). Toggling `close`/`reopen` updates the checkboxes in the plan files directly.
+
+Select a tracker with `--tracker <bd|github|checklist|auto>` or in `yojana.config.json` via `"tracker": "github"` or `"tracker": "checklist"`. Auto-detection routes by ID shape and workspace setup.
+
 ## When claims and work disagree
 
 `yojana status --check` flags two mismatches. **close?**: every claim holds but a linked bead

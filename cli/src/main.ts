@@ -56,7 +56,7 @@ import {
   spawnMedha,
   TextVerifier,
 } from '@cntxt-labs/yojana-verify';
-import { BdWorkLink, spawnBd } from '@cntxt-labs/yojana-work';
+import { createWorkLink, type TrackerType, type WorkLinkPort } from '@cntxt-labs/yojana-work';
 import SKILL from '../../claude-plugin/skills/yojana/SKILL.md' with { type: 'text' };
 import { loadConfig, themeStylesheet } from './config.ts';
 import { reviewTemplate, startReviewServer } from './serve.ts';
@@ -109,6 +109,7 @@ Options:
   --strict           check: also fail when a claim cannot be verified
   --check            status: also run the claim checks
   --stale-days <n>   status: an open change older than this is stale (default 14)
+  --tracker <type>   work tracker adapter: bd, github, checklist, or composite (default: auto)
 
 An agent (YOJANA_AGENT set, YOJANA_ACTOR not) proposes; only a person finalizes or declines a
 status change or approves a requirement. When an agent ingests, a changed status line becomes a
@@ -121,8 +122,8 @@ printed as {"error": {"code", "message", "hint"}}.
 YOJANA_CONFIG names a yojana.config.json (paths, fonts, theme tokens, a theme file) that review
 pages use; the Claude Code plugin keeps one in its data folder.
 
-Claims run through anvesa (wql, dependents) and progress through bd; set ANVESA_BIN or BD_BIN if
-they are not on PATH.
+Claims run through anvesa (wql, dependents) and progress through bd, GitHub Issues (gh), or
+plain-Markdown checklists; set ANVESA_BIN, BD_BIN, or GH_BIN if they are not on PATH.
 `;
 
 type Write = (text: string) => void;
@@ -162,6 +163,7 @@ interface Flags {
   readonly finalize: string | undefined;
   readonly decline: string | undefined;
   readonly dryRun: boolean;
+  readonly tracker: string | undefined;
   readonly positional: readonly string[];
 }
 
@@ -193,6 +195,7 @@ function parseFlags(argv: readonly string[]): Flags {
     finalize: undefined as string | undefined,
     decline: undefined as string | undefined,
     dryRun: false,
+    tracker: undefined as string | undefined,
     positional: [] as string[],
   };
   for (let i = 0; i < argv.length; i++) {
@@ -220,6 +223,7 @@ function parseFlags(argv: readonly string[]): Flags {
     else if (arg === '--final') flags.final = true;
     else if (arg === '--finalize') flags.finalize = value();
     else if (arg === '--decline') flags.decline = value();
+    else if (arg === '--tracker' || arg === '--worklink') flags.tracker = value();
     else if (arg === '--port') {
       const port = Number(value());
       if (!Number.isInteger(port) || port < 0 || port > MAX_PORT) {
@@ -622,8 +626,20 @@ function runRemoveComment(flags: Flags, write: Write): Promise<number> {
 
 // decisions
 
-function worklink(root: string): BdWorkLink {
-  return new BdWorkLink(spawnBd(process.env.BD_BIN ?? 'bd', root));
+function worklink(root: string, flags?: Flags): WorkLinkPort {
+  const config = loadConfig();
+  const type =
+    (flags?.tracker as TrackerType | undefined) ??
+    (process.env.YOJANA_TRACKER as TrackerType | undefined) ??
+    (config.tracker as TrackerType | undefined) ??
+    'auto';
+  const plansDir = flags?.plans ?? (config.home ? join(config.home, 'plans') : undefined);
+  return createWorkLink({
+    type,
+    root,
+    plansDir,
+    repo: config.github?.repo,
+  });
 }
 
 function runDecide(flags: Flags, write: Write): Promise<number> {
@@ -659,7 +675,7 @@ function runDecide(flags: Flags, write: Write): Promise<number> {
     const next =
       d.status === 'recorded'
         ? 'proposed; a person finalizes it on the review page or with yojana decisions --finalize'
-        : `${d.status}; yojana decisions --apply runs it through ${worklink(flags.root).name}`;
+        : `${d.status}; yojana decisions --apply runs it through ${worklink(flags.root, flags).name}`;
     emit(flags, write, result, `${d.id}  ${d.decision} ${d.item}: ${next}\n`);
     return 0;
   });
@@ -749,7 +765,7 @@ function runDecisions(flags: Flags, write: Write): Promise<number> {
     if (flags.apply) {
       const applied = await applyDecisions({
         store: ws.store,
-        worklink: worklink(flags.root),
+        worklink: worklink(flags.root, flags),
         actor: actor(),
       });
       const lines = applied.map((a) => `${a.id}  ${a.outcome}: ${a.note}\n`).join('');
@@ -885,7 +901,7 @@ async function runServe(flags: Flags, write: Write): Promise<number> {
     actor: person(),
     runCheck: flags.runCheck,
     verifiers: () => verifiers(flags.root),
-    worklink: () => worklink(flags.root),
+    worklink: () => worklink(flags.root, flags),
   });
   const plans = await server.plans();
   write(`review server on ${server.url} (this machine only); stop it with Ctrl+C\n`);
@@ -922,7 +938,7 @@ function runReview(flags: Flags, write: Write): Promise<number> {
       changesDir: flags.changes,
       runCheck: flags.runCheck,
       verifiers: () => verifiers(flags.root),
-      worklink: () => worklink(flags.root),
+      worklink: () => worklink(flags.root, flags),
       you: person(),
       mode: 'read',
     });
@@ -1067,7 +1083,7 @@ function describeActionsSync(report: ActionsSyncReport): string {
 function runActionsSync(flags: Flags, write: Write): Promise<number> {
   const [, planId] = flags.positional;
   return withWorkspace(flags, async (ws) => {
-    const wl = worklink(flags.root);
+    const wl = worklink(flags.root, flags);
     const report = await syncActions({
       parser: ws.parser,
       worklink: wl,
@@ -1127,7 +1143,7 @@ function runRulesPropose(flags: Flags, write: Write): Promise<number> {
       verifiers: verifiers(flags.root),
       planId,
     });
-    const wl = worklink(flags.root);
+    const wl = worklink(flags.root, flags);
     const medhaBin = process.env.MEDHA_BIN ?? 'medha';
     const ruleSink = new MedhaRuleSink(spawnMedha(medhaBin, flags.root));
     const report = await proposeRules({
@@ -1405,7 +1421,7 @@ function runStatus(flags: Flags, write: Write): Promise<number> {
       parser: ws.parser,
       bases: ws.bases,
       files: loadPlanFiles(flags.root, ws.plansDir),
-      worklink: new BdWorkLink(spawnBd(process.env.BD_BIN ?? 'bd', flags.root)),
+      worklink: worklink(flags.root, flags),
       checks,
       now: Date.now(),
       staleDays: flags.staleDays,

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "WorkLinkPort adapters: plan progress read from bd (beads).",
+  "description": "WorkLinkPort adapters: plan progress read from bd (beads), GitHub Issues (gh), or plain-Markdown checklists.",
   "exports": {
     ".": "./src/index.ts"
   },

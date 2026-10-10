@@ -9,10 +9,10 @@ edit, and records every change to every requirement in an append-only log. From 
 - which requirements changed, from which revision, in which change, and why;
 - when two changes edit the same requirement (archive refuses instead of overwriting);
 - which claims in a plan the code no longer satisfies (checked with [anvesa](https://github.com/nimishph/anvesa));
-- how far along a plan is, read from its [beads](https://github.com/steveyegge/beads), never typed in.
+- how far along a plan is, read from its work items ([beads](https://github.com/steveyegge/beads), GitHub Issues via `gh`, or plain-Markdown checklists where `- [x]` items count as done), never typed in.
 
 It is part of the cntxt-labs set: **medha** for rules, **anvesa** for code, **yojana** for intent.
-It works alongside [bd](https://github.com/steveyegge/beads) (not part of cntxt-labs), which owns the work.
+Progress comes from wherever you already track work: bd, GitHub Issues, or plain Markdown checklists.
 
 > [!NOTE]
 > Pre-release: the commands work and are tested, but the log format and commands may still change.

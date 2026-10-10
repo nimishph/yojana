@@ -82,6 +82,16 @@ describe('loadConfig', () => {
     });
   });
 
+  test('tracker and github configurations are parsed', () => {
+    const { env } = configWith({
+      tracker: 'github',
+      github: { repo: 'acme/widgets' },
+    });
+    const config = loadConfig(env);
+    expect(config.tracker).toBe('github');
+    expect(config.github).toEqual({ repo: 'acme/widgets' });
+  });
+
   test('a mistake is reported, not ignored', () => {
     const cases: [unknown, RegExp][] = [
       ['{ not json', /is not JSON/],

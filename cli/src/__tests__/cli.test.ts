@@ -407,3 +407,13 @@ describe('yojana rules propose', () => {
     expect(alias.out).toMatch(/skipped \d+ requirements/);
   });
 });
+
+describe('tracker adapter selection', () => {
+  test('supports --tracker checklist and --tracker github', async () => {
+    const statusResult = await yojana('status', '--tracker', 'checklist');
+    expect(statusResult.code).toBe(0);
+
+    const syncResult = await yojana('actions', 'sync', '--tracker', 'checklist', '--dry-run');
+    expect(syncResult.code).toBe(0);
+  });
+});

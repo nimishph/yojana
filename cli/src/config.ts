@@ -38,6 +38,8 @@ export interface YojanaConfig {
   readonly home: string | undefined;
   readonly theme: ThemeConfig;
   readonly verifiers: readonly ExternalVerifierConfig[];
+  readonly tracker?: string | undefined;
+  readonly github?: { readonly repo?: string | undefined } | undefined;
 }
 
 export interface ThemeConfig {
@@ -57,6 +59,8 @@ const EMPTY: YojanaConfig = {
   home: undefined,
   theme: { css: undefined, fonts: {}, tokens: {}, dark: {} },
   verifiers: [],
+  tracker: undefined,
+  github: undefined,
 };
 
 /** A token name as patra's themes spell it, without the leading dashes. */
@@ -78,7 +82,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): YojanaConfig {
   } catch (cause) {
     throw invalid(path, `is not JSON: ${(cause as Error).message}`);
   }
-  const top = record(path, raw, 'the file', ['vars', 'home', 'theme', 'verifiers', 'adapters']);
+  const top = record(path, raw, 'the file', [
+    'vars',
+    'home',
+    'theme',
+    'verifiers',
+    'adapters',
+    'tracker',
+    'worklink',
+    'github',
+  ]);
 
   const vars: Record<string, string> = {};
   for (const [name, value] of Object.entries(record(path, top.vars ?? {}, 'vars'))) {
@@ -154,6 +167,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): YojanaConfig {
     verifiers.push({ name, command, args, kinds, env: customEnv });
   }
 
+  const tracker =
+    top.tracker !== undefined
+      ? text(path, top.tracker, 'tracker')
+      : top.worklink !== undefined
+        ? text(path, top.worklink, 'worklink')
+        : undefined;
+
+  let githubConfig: { readonly repo?: string | undefined } | undefined;
+  if (top.github !== undefined) {
+    const rawGithub = record(path, top.github, 'github', ['repo']);
+    githubConfig = {
+      repo: rawGithub.repo !== undefined ? text(path, rawGithub.repo, 'github.repo') : undefined,
+    };
+  }
+
   return {
     path,
     found: true,
@@ -166,6 +194,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): YojanaConfig {
       dark: tokens(path, theme.dark, 'theme.dark'),
     },
     verifiers,
+    tracker,
+    github: githubConfig,
   };
 }
 
