@@ -423,3 +423,64 @@ describe('status proposals and approvals', () => {
     expect(openAnomalies(state).map((a) => a.code)).toEqual(['ANNOTATION_UNKNOWN']);
   });
 });
+
+describe('actions in foldLog', () => {
+  test('older logs without actions fold cleanly', () => {
+    const legacyReq: Requirement = {
+      id: 'legacy',
+      title: 'Legacy',
+      text: 'Text without actions',
+      revision: 'r_legacy',
+      claims: [],
+    };
+    const state = foldLog(log({ type: 'revision-recorded', planId: 'p', requirement: legacyReq }));
+    const head = state.plans.get('p')?.heads.get('legacy');
+    expect(head?.actions).toBeUndefined();
+    expect(head?.actionsRevision).toBeUndefined();
+  });
+
+  test('actions fold with their own revision; editing actions does not invalidate requirement approvals', () => {
+    const act1 = { id: 'act-1', text: 'Step 1' };
+    const rWithActs: Requirement = {
+      ...a1,
+      actions: [act1],
+      actionsRevision: 'r_act_1',
+    };
+    const rActsUpdated: Requirement = {
+      ...a1,
+      actions: [
+        { id: 'act-1', text: 'Step 1 edited' },
+        { id: 'act-2', text: 'Step 2' },
+      ],
+      actionsRevision: 'r_act_2',
+    };
+    const state = foldLog(
+      log(
+        { type: 'revision-recorded', planId: 'p', requirement: rWithActs },
+        {
+          type: 'requirement-approved',
+          planId: 'p',
+          requirement: 'a',
+          revision: a1.revision,
+        },
+        // Re-planning actions: requirement.revision is still a1.revision, only actions changed
+        {
+          type: 'revision-recorded',
+          planId: 'p',
+          requirement: rActsUpdated,
+          base: a1.revision,
+        },
+      ),
+    );
+    const plan = state.plans.get('p');
+    const head = plan?.heads.get('a');
+    expect(head?.actions).toHaveLength(2);
+    expect(head?.actionsRevision).toBe('r_act_2');
+    expect(head?.revision).toBe(a1.revision);
+    // Approval is NOT stale because requirement.revision did not change!
+    expect(plan && approvalOf(plan, 'a')).toMatchObject({
+      verdict: 'approved',
+      stale: false,
+    });
+  });
+});

@@ -1,6 +1,7 @@
 import {
   type DecisionState,
   foldLog,
+  requirementWorkItems,
   type StorePort,
   WORK_DECISIONS,
   type WorkDecision,
@@ -56,7 +57,7 @@ export async function recordDecision(request: DecisionRequest): Promise<Decision
   if (!isDecision(request.decision)) {
     return refuse('INVALID', `a decision is one of ${WORK_DECISIONS.join(', ')}`);
   }
-  const linked = requirement.workItems ?? [];
+  const linked = requirementWorkItems(requirement);
   if (!linked.includes(request.item)) {
     return refuse(
       'NOT_LINKED',

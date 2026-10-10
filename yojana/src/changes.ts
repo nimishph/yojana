@@ -73,11 +73,15 @@ export async function openChange(options: {
     }
     const id = delta.op === 'remove' ? delta.id : delta.requirement.id;
     const base = heads.get(id);
-    if (base === undefined) {
+    const headReq = state.plans.get(draft.planId)?.heads.get(id);
+    if (base === undefined || headReq === undefined) {
       refuse(id, 'NOT_FOUND', `${id} is not in ${draft.planId}; use ADDED`);
     } else if (delta.op === 'remove') {
       deltas.push({ op: 'remove', id, base });
-    } else if (delta.requirement.revision === base) {
+    } else if (
+      delta.requirement.revision === base &&
+      delta.requirement.actionsRevision === headReq.actionsRevision
+    ) {
       refuse(id, 'UNCHANGED', `${id} is marked MODIFIED but reads the same as the plan`);
     } else {
       deltas.push({ op: 'modify', requirement: delta.requirement, base });
@@ -179,12 +183,20 @@ export async function archiveChange(options: {
       break;
     }
   }
-  const logStatus = state.plans.get(change.planId)?.status;
+  const logPlan = state.plans.get(change.planId);
+  const logStatus = logPlan?.status;
   const inStep =
     found?.plan !== undefined &&
     found.plan.status === logStatus &&
     found.plan.requirements.length === heads.size &&
-    found.plan.requirements.every((r) => heads.get(r.id) === r.revision);
+    found.plan.requirements.every((r) => {
+      const head = logPlan?.heads.get(r.id);
+      return (
+        head !== undefined &&
+        head.revision === r.revision &&
+        head.actionsRevision === r.actionsRevision
+      );
+    });
 
   await store.append({ type: 'change-archived', changeId }, actor);
 

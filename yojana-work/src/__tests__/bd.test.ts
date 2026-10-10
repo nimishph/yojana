@@ -129,3 +129,33 @@ describe('BdWorkLink.close and reopen', () => {
     expect(!answer.ok && answer.error).toContain('could not run bd');
   });
 });
+
+describe('BdWorkLink.create', () => {
+  test('runs bd create with title, parent, and description, returning the new id', async () => {
+    const seen: string[][] = [];
+    const bd = new BdWorkLink(runner({ id: 'yoj-new.1', title: 'Task 1' }, seen));
+    const result = await bd.create({
+      title: 'Task 1',
+      parent: 'yoj-parent',
+      description: 'Done when claims hold',
+    });
+    expect(result).toEqual({ ok: true, id: 'yoj-new.1' });
+    expect(seen[0]).toEqual([
+      'create',
+      'Task 1',
+      '--json',
+      '--parent',
+      'yoj-parent',
+      '--description',
+      'Done when claims hold',
+    ]);
+  });
+
+  test('reports errors if bd fails or stdout lacks an id', async () => {
+    const noId = new BdWorkLink(runner({ error: 'failed' }));
+    expect(await noId.create({ title: 'Task' })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('answered without an id'),
+    });
+  });
+});

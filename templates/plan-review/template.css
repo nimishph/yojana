@@ -1,5 +1,5 @@
 /*
- * review-document layout. Uses only theme tokens (see template.json "tokens").
+ * plan-review layout. Uses only theme tokens (see template.json "tokens").
  * Three panes on wide screens: outline, document, review rail. On narrow screens the outline and
  * rail stack below the document. Without the runtime (a static export) controls marked
  * .live-only are hidden, .saved-only shown, and every rail panel shows; with it, <html
@@ -213,6 +213,10 @@ meter {
   min-height: calc(100vh - 60px);
 }
 .rd-outline {
+  position: sticky;
+  top: calc(60px + env(safe-area-inset-top, 0px));
+  max-height: calc(100vh - 60px - env(safe-area-inset-top, 0px));
+  overflow-y: auto;
   background: var(--surface-sunken);
   border-right: 1px solid var(--border);
   padding: 14px 12px;
@@ -410,6 +414,57 @@ meter {
 .callout-notes .danger {
   color: var(--intent-danger);
 }
+.sec-actions {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 6px;
+}
+.sec-actions-title {
+  font: 600 12px var(--font-ui);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.sec-actions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.sec-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font: 14px / 1.4 var(--font-reading);
+}
+.action-check {
+  font: 600 13px var(--font-mono);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  user-select: none;
+}
+.sec-action.is-done .action-check {
+  color: var(--intent-success);
+}
+.action-text {
+  color: var(--text);
+}
+.action-id {
+  font: 12px var(--font-mono);
+  color: var(--text-muted);
+}
+.action-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
 .evidence {
   list-style: none;
   margin: 0;
@@ -446,6 +501,10 @@ meter {
 }
 
 .rd-rail {
+  position: sticky;
+  top: calc(60px + env(safe-area-inset-top, 0px));
+  max-height: calc(100vh - 60px - env(safe-area-inset-top, 0px));
+  overflow-y: auto;
   background: var(--surface-sunken);
   border-left: 1px solid var(--border);
   min-width: 0;
@@ -619,6 +678,9 @@ form.inline textarea {
     grid-template-columns: minmax(0, 1fr);
   }
   .rd-outline {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
     border-right: 0;
     border-bottom: 1px solid var(--border);
     order: 1;
@@ -627,6 +689,9 @@ form.inline textarea {
     order: 2;
   }
   .rd-rail {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
     border-left: 0;
     border-top: 1px solid var(--border);
     order: 3;
@@ -674,6 +739,9 @@ form.inline textarea {
     background: none;
   }
   .rd-rail {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
     border: 0;
     background: none;
   }

@@ -1,5 +1,5 @@
 {
-  "id": "review-document",
+  "id": "plan-review",
   "version": "0.1.0",
   "description": "A long document with an outline and a review rail: sections with properties, evidence and flags; threads pinned to quotes; changes as diffs to accept or reject; callouts that ask for a decision on the whole document; an activity feed.",
   "page": "page.html",

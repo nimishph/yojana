@@ -1,4 +1,5 @@
 import {
+  type ActionId,
   type Anomaly,
   type BasePort,
   foldLog,
@@ -8,6 +9,7 @@ import {
   type PlanStatus,
   type Requirement,
   type RequirementId,
+  requirementWorkItems,
   type StorePort,
   type WorkItem,
   type WorkLinkPort,
@@ -15,6 +17,20 @@ import {
 import type { CheckReport } from './check.ts';
 import { ingest, type PlanFile } from './ingest.ts';
 import { type PlanProgress, progress } from './progress.ts';
+
+/**
+ * An action linked to work items, set against its claim results, with derived done state.
+ */
+export interface ActionAlignment {
+  readonly action: ActionId;
+  readonly text: string;
+  readonly items: readonly WorkItem[];
+  readonly holds: number;
+  readonly violated: number;
+  readonly unverifiable: number;
+  readonly done: boolean;
+  readonly mismatch: 'claims-hold-work-open' | 'work-closed-claims-violated' | undefined;
+}
 
 /**
  * A requirement linked to work items, set against its claim results. Two mismatches are worth a
@@ -28,6 +44,7 @@ export interface RequirementAlignment {
   readonly violated: number;
   readonly unverifiable: number;
   readonly mismatch: 'claims-hold-work-open' | 'work-closed-claims-violated' | undefined;
+  readonly actions?: readonly ActionAlignment[] | undefined;
 }
 
 /**
@@ -185,9 +202,13 @@ async function align(
   checks: CheckReport | undefined,
   worklink: WorkLinkPort | undefined,
 ): Promise<RequirementAlignment[]> {
-  const linked = heads.filter((r) => (r.workItems ?? []).length > 0);
+  const linked = heads.filter(
+    (r) =>
+      requirementWorkItems(r).length > 0 ||
+      (r.actions ?? []).some((a) => (a.claims ?? []).length > 0),
+  );
   if (checks === undefined || worklink === undefined || linked.length === 0) return [];
-  const ids = [...new Set(linked.flatMap((r) => r.workItems ?? []))];
+  const ids = [...new Set(linked.flatMap((r) => requirementWorkItems(r)))];
   const lookup = await worklink.get(ids);
   if (!lookup.ok) return [];
   const byId = new Map(lookup.items.map((item) => [item.id, item]));
@@ -197,13 +218,14 @@ async function align(
     const items = (requirement.workItems ?? []).map(
       (id) => byId.get(id) ?? { id, title: '', state: 'missing' as const },
     );
-    const own = results.filter((r) => r.requirement === requirement.id);
-    const count = (outcome: string) => own.filter((r) => r.outcome === outcome).length;
+    const own = results.filter((r) => r.requirement === requirement.id && r.action === undefined);
+    const driving = own.filter((r) => r.deterministic !== false);
+    const count = (outcome: string) => driving.filter((r) => r.outcome === outcome).length;
     const holds = count('holds');
     const violated = count('violated');
     const unverifiable = count('unverifiable');
-    const allHold = own.length > 0 && holds === own.length;
-    const allClosed = items.every((i) => i.state === 'closed');
+    const allHold = driving.length > 0 && holds === driving.length;
+    const allClosed = items.length > 0 && items.every((i) => i.state === 'closed');
     const someOpen = items.some((i) => i.state !== 'closed' && i.state !== 'missing');
     const mismatch =
       allHold && someOpen
@@ -211,6 +233,53 @@ async function align(
         : violated > 0 && allClosed
           ? ('work-closed-claims-violated' as const)
           : undefined;
-    return { requirement: requirement.id, items, holds, violated, unverifiable, mismatch };
+
+    const actions = requirement.actions?.map((act) => {
+      const actItems = (act.workItems ?? []).map(
+        (id) => byId.get(id) ?? { id, title: '', state: 'missing' as const },
+      );
+      const actResults = results.filter(
+        (r) => r.requirement === requirement.id && r.action === act.id,
+      );
+      const actDriving = actResults.filter((r) => r.deterministic !== false);
+      const actCount = (outcome: string) => actDriving.filter((r) => r.outcome === outcome).length;
+      const actHolds = actCount('holds');
+      const actViolated = actCount('violated');
+      const actUnverifiable = actCount('unverifiable');
+      const actAllHold = actDriving.length > 0 && actHolds === actDriving.length;
+      const actAllClosed = actItems.length > 0 && actItems.every((i) => i.state === 'closed');
+      const actSomeOpen = actItems.some((i) => i.state !== 'closed' && i.state !== 'missing');
+      const actMismatch =
+        actAllHold && actSomeOpen
+          ? ('claims-hold-work-open' as const)
+          : actViolated > 0 && actAllClosed
+            ? ('work-closed-claims-violated' as const)
+            : undefined;
+      const hasItems = actItems.length > 0;
+      const hasClaims = actDriving.length > 0;
+      const done =
+        (hasItems || hasClaims) && (!hasItems || actAllClosed) && (!hasClaims || actAllHold);
+
+      return {
+        action: act.id,
+        text: act.text,
+        items: actItems,
+        holds: actHolds,
+        violated: actViolated,
+        unverifiable: actUnverifiable,
+        done,
+        mismatch: actMismatch,
+      };
+    });
+
+    return {
+      requirement: requirement.id,
+      items,
+      holds,
+      violated,
+      unverifiable,
+      mismatch,
+      ...(actions === undefined ? {} : { actions }),
+    };
   });
 }

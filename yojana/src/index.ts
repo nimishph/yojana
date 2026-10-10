@@ -13,7 +13,7 @@ export {
   openChange,
   type PlanFileUpdate,
 } from './changes.ts';
-export { type CheckReport, check, type PlanCheck } from './check.ts';
+export { type CheckOptions, type CheckReport, check, type PlanCheck } from './check.ts';
 export {
   type CommentResult,
   comment,
@@ -57,6 +57,7 @@ export {
   ago,
   type ProjectOptions,
   projectReview,
+  type ReviewAction,
   type ReviewActivity,
   type ReviewChange,
   type ReviewDocument,
@@ -64,6 +65,13 @@ export {
   type ReviewThread,
 } from './project.ts';
 export { type RefreshedFile, type RefreshReport, refresh } from './refresh.ts';
+export {
+  type ProposeRulesOptions,
+  type ProposeRulesReport,
+  proposeRules,
+  type RuleProposalEntry,
+  type RuleSkippedEntry,
+} from './rule-sink.ts';
 export {
   REVIEW_TEMPLATE,
   type ReviewAnswer,
@@ -73,12 +81,20 @@ export {
   reviewSession,
 } from './session.ts';
 export {
+  type ActionAlignment,
   type FileState,
   type OpenChange,
   type PlanReport,
+  type RequirementAlignment,
   type StatusReport,
   status,
 } from './status.ts';
+export {
+  type ActionsSyncReport,
+  type SyncedAction,
+  type SyncedPlanFile,
+  syncActions,
+} from './sync-actions.ts';
 export {
   ensureGitAttributes,
   loadPlanFiles,

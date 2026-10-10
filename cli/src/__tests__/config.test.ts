@@ -47,6 +47,41 @@ describe('loadConfig', () => {
     expect(tilde.home).toBe(join(homedir(), 'yojana'));
   });
 
+  test('verifiers and adapters are parsed, expanding paths in command', () => {
+    const { path, env } = configWith({
+      verifiers: [
+        {
+          name: 'custom-checker',
+          command: './bin/check.sh',
+          args: ['--strict'],
+          kinds: ['custom.lint'],
+          env: { FOO: 'bar' },
+        },
+      ],
+      adapters: [
+        {
+          command: 'external-tool',
+        },
+      ],
+    });
+    const config = loadConfig(env);
+    expect(config.verifiers).toHaveLength(2);
+    expect(config.verifiers[0]).toEqual({
+      name: 'custom-checker',
+      command: join(path, '..', 'bin', 'check.sh'),
+      args: ['--strict'],
+      kinds: ['custom.lint'],
+      env: { FOO: 'bar' },
+    });
+    expect(config.verifiers[1]).toEqual({
+      name: 'external-tool',
+      command: 'external-tool',
+      args: undefined,
+      kinds: undefined,
+      env: undefined,
+    });
+  });
+
   test('a mistake is reported, not ignored', () => {
     const cases: [unknown, RegExp][] = [
       ['{ not json', /is not JSON/],
@@ -57,6 +92,18 @@ describe('loadConfig', () => {
       [{ theme: { tokens: { text: 'red; } body { display: none' } } }, /not a CSS value/],
       [{ theme: { fonts: { serif: 'Georgia' } } }, /unknown setting "serif"/],
       [{ theme: { css: './missing.css' } }, /no file at/],
+      [{ verifiers: 'not-an-array' }, /verifiers must be an array/],
+      [{ adapters: {} }, /adapters must be an array/],
+      [{ verifiers: [{}] }, /verifiers\[0\].command must be a string/],
+      [
+        { verifiers: [{ command: 'foo', args: 'not-array' }] },
+        /verifiers\[0\].args must be an array/,
+      ],
+      [
+        { verifiers: [{ command: 'foo', kinds: 'not-array' }] },
+        /verifiers\[0\].kinds must be an array/,
+      ],
+      [{ verifiers: [{ command: 'foo', extra: 123 }] }, /unknown setting "extra"/],
     ];
     for (const [content, message] of cases) {
       expect(() => loadConfig(configWith(content).env)).toThrow(message);

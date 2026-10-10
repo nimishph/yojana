@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadTemplate } from '@cntxt-labs/patra-core';
-import { templateDir } from '@cntxt-labs/patra-templates';
 import { foldLog, waitingProposals, YojanaError } from '@cntxt-labs/yojana-core';
 import { MarkdownParser } from '@cntxt-labs/yojana-markdown';
 import { MemoryBaseStore, MemoryStore } from '@cntxt-labs/yojana-store';
@@ -16,7 +15,7 @@ import {
   proposeStatus,
 } from '../plan-status.ts';
 import { projectReview } from '../project.ts';
-import { type ReviewIntent, reviewSession } from '../session.ts';
+import { REVIEW_TEMPLATE, type ReviewIntent, reviewSession } from '../session.ts';
 import { loadPlanFiles, openWorkspace } from '../workspace.ts';
 
 const parser = new MarkdownParser();
@@ -309,7 +308,7 @@ describe('declining a requirement', () => {
 describe('the review page', () => {
   const root = mkdtempSync(join(tmpdir(), 'yojana-plan-status-'));
   afterAll(() => rmSync(root, { recursive: true, force: true }));
-  const loaded = loadTemplate(templateDir('review-document'));
+  const loaded = loadTemplate(join(import.meta.dir, '..', '..', '..', 'templates', 'plan-review'));
   if (!loaded.ok) throw new YojanaError('TEST_FIXTURE', JSON.stringify(loaded.problems));
   const template = loaded.template;
 
@@ -321,7 +320,7 @@ describe('the review page', () => {
     payload: Record<string, string> = {},
     version?: string,
   ): ReviewIntent => ({
-    template: 'review-document',
+    template: REVIEW_TEMPLATE,
     document: 'plan/p',
     action,
     target: { part, key },
@@ -369,7 +368,7 @@ describe('the review page', () => {
     });
     await ws.store.close();
 
-    const content = await session.load('review-document', 'plan/p');
+    const content = await session.load(REVIEW_TEMPLATE, 'plan/p');
     expect(template.check(content)).toEqual([]);
     expect(content?.callouts).toEqual([
       {
@@ -387,7 +386,7 @@ describe('the review page', () => {
     expect(
       await session.handle(intent('approve', 'section', 'shipped', {}, shipped?.version)),
     ).toEqual({ ok: true, update: { kind: 'page' } });
-    const after = await session.load('review-document', 'plan/p');
+    const after = await session.load(REVIEW_TEMPLATE, 'plan/p');
     expect(after?.callouts[0]?.notes?.[0]?.label).toBe(
       '1 of 2 requirements not approved, or changed since',
     );
@@ -396,7 +395,7 @@ describe('the review page', () => {
 
   test("declining an agent's status edit puts the file's status line back", async () => {
     await asAgent(plan('accepted'));
-    const content = await session.load('review-document', 'plan/p');
+    const content = await session.load(REVIEW_TEMPLATE, 'plan/p');
     const callout = content?.callouts[0];
     expect(callout).toMatchObject({
       text: 'claude proposes moving this plan from draft to accepted: “edited in plans/p.md”',
@@ -410,7 +409,7 @@ describe('the review page', () => {
         .ok,
     ).toBe(true);
     expect(file()).toContain('status: draft');
-    expect((await session.load('review-document', 'plan/p'))?.callouts[0]?.id).toBe('next');
+    expect((await session.load(REVIEW_TEMPLATE, 'plan/p'))?.callouts[0]?.id).toBe('next');
   });
 
   test('confirming moves the plan and its file; the offer then moves on', async () => {
@@ -418,7 +417,7 @@ describe('the review page', () => {
       (await session.handle(intent('confirm', 'callout', 'next', { decision: 'accepted' }))).ok,
     ).toBe(true);
     expect(file()).toContain('status: accepted');
-    const content = await session.load('review-document', 'plan/p');
+    const content = await session.load(REVIEW_TEMPLATE, 'plan/p');
     expect(content?.document.status).toEqual({ label: 'accepted', intent: 'primary' });
     expect(content?.callouts[0]?.buttons).toEqual([
       { action: 'confirm', label: 'Move to in-progress', decision: 'in-progress' },

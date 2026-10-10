@@ -40,6 +40,18 @@ export interface WorkLinkPort {
    */
   close?(id: string, reason: string): Promise<WorkChange>;
   reopen?(id: string, reason: string): Promise<WorkChange>;
+  /**
+   * Create a new item in the tracker (e.g. bead for an action item).
+   */
+  create?(options: {
+    readonly title: string;
+    readonly parent?: string | undefined;
+    readonly description?: string | undefined;
+  }): Promise<WorkCreateResult>;
 }
 
 export type WorkChange = { readonly ok: true } | { readonly ok: false; readonly error: string };
+
+export type WorkCreateResult =
+  | { readonly ok: true; readonly id: string }
+  | { readonly ok: false; readonly error: string };

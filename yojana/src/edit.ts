@@ -82,6 +82,9 @@ function rewritten(head: Requirement, title: string, text: string): Requirement 
     title: title.trim(),
     text: normalizeContent(text),
     claims: head.claims,
+    ...(head.actions !== undefined
+      ? { actions: head.actions, actionsRevision: head.actionsRevision }
+      : {}),
     ...(head.workItems === undefined ? {} : { workItems: head.workItems }),
   };
   return { ...fields, revision: requirementRevision(fields) };

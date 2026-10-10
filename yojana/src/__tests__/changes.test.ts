@@ -117,6 +117,29 @@ describe('openChange', () => {
     const unknown = await openChange({ store: ctx.store, draft: parsed.change, actor: 'me' });
     expect(unknown.problems.map((p) => p.code)).toEqual(['PLAN_NOT_FOUND']);
   });
+
+  test('allows changing actions when requirement text is unchanged', async () => {
+    const ctx = await setup();
+    const resAdd = await ctx.open(
+      'add-acts',
+      [
+        '## MODIFIED Requirement: alpha {#a}',
+        '',
+        'Alpha as planned.',
+        '',
+        '### Actions',
+        '- [ ] First step {#act-1 bead=b-1}',
+      ].join('\n'),
+    );
+    expect(resAdd.outcome).toBe('opened');
+
+    const resSame = await ctx.open(
+      'same-acts',
+      ['## MODIFIED Requirement: alpha {#a}', '', 'Alpha as planned.'].join('\n'),
+    );
+    expect(resSame.outcome).toBe('refused');
+    expect(resSame.problems[0]?.code).toBe('UNCHANGED');
+  });
 });
 
 describe('archiveChange', () => {
@@ -210,6 +233,132 @@ describe('archiveChange', () => {
     await ctx.archive('tweak');
     expect((await ctx.archive('tweak')).problems.map((p) => p.code)).toEqual(['CHANGE_NOT_OPEN']);
     expect((await ctx.archive('nope')).problems.map((p) => p.code)).toEqual(['CHANGE_NOT_FOUND']);
+  });
+
+  test('applies changes that add, edit, or remove actions under requirements', async () => {
+    const ctx = await setup();
+    // 1. Add actions to requirement a
+    await ctx.open(
+      'add-act',
+      [
+        '## MODIFIED Requirement: alpha {#a}',
+        '',
+        'Alpha as planned.',
+        '',
+        '### Actions',
+        '- [ ] Action 1 {#act-1 bead=b-1}',
+      ].join('\n'),
+    );
+    const arch1 = await ctx.archive('add-act');
+    expect(arch1.outcome).toBe('archived');
+    expect(arch1.planFile?.updated).toBe(true);
+
+    let state = await ctx.state();
+    let headA = state.plans.get('plan/p')?.heads.get('a');
+    expect(headA?.actions).toHaveLength(1);
+    expect(headA?.actions?.[0]?.id).toBe('act-1');
+    expect(headA?.actions?.[0]?.workItems).toEqual(['b-1']);
+    expect(ctx.files.get(PLAN_SOURCE)).toContain('### Actions');
+    expect(ctx.files.get(PLAN_SOURCE)).toContain('- Action 1 {#act-1 bead=b-1}');
+
+    // 2. Edit actions of requirement a
+    await ctx.open(
+      'edit-act',
+      [
+        '## MODIFIED Requirement: alpha {#a}',
+        '',
+        'Alpha as planned.',
+        '',
+        '### Actions',
+        '- [ ] Action 1 modified {#act-1 bead=b-2}',
+        '- [ ] Action 2 {#act-2}',
+      ].join('\n'),
+    );
+    const arch2 = await ctx.archive('edit-act');
+    expect(arch2.outcome).toBe('archived');
+
+    state = await ctx.state();
+    headA = state.plans.get('plan/p')?.heads.get('a');
+    expect(headA?.actions).toHaveLength(2);
+    expect(headA?.actions?.[0]?.text).toBe('Action 1 modified');
+    expect(headA?.actions?.[0]?.workItems).toEqual(['b-2']);
+    expect(headA?.actions?.[1]?.id).toBe('act-2');
+    expect(ctx.files.get(PLAN_SOURCE)).toContain('- Action 1 modified {#act-1 bead=b-2}');
+    expect(ctx.files.get(PLAN_SOURCE)).toContain('- Action 2 {#act-2}');
+
+    // 3. Remove actions from requirement a
+    await ctx.open(
+      'remove-act',
+      ['## MODIFIED Requirement: alpha {#a}', '', 'Alpha as planned.'].join('\n'),
+    );
+    const arch3 = await ctx.archive('remove-act');
+    expect(arch3.outcome).toBe('archived');
+
+    state = await ctx.state();
+    headA = state.plans.get('plan/p')?.heads.get('a');
+    expect(headA?.actions).toBeUndefined();
+    expect(ctx.files.get(PLAN_SOURCE)).not.toContain('### Actions');
+
+    // 4. File, base and log agree: ingest is unchanged
+    const after = await ctx.ingestFiles();
+    expect(after.files[0]).toMatchObject({ outcome: 'unchanged', requirements: [] });
+  });
+
+  test('refuses to update plan file if local plan file has unrecorded action edits', async () => {
+    const ctx = await setup();
+    await ctx.open(
+      'add-act',
+      [
+        '## MODIFIED Requirement: alpha {#a}',
+        '',
+        'Alpha as planned.',
+        '',
+        '### Actions',
+        '- [ ] Action 1 {#act-1}',
+      ].join('\n'),
+    );
+    // Locally edit beta's actions without ingesting
+    const localEdit = PLAN.replace(
+      'Beta as planned.',
+      'Beta as planned.\n\n### Actions\n- [ ] Unrecorded action {#act-unrecorded}',
+    );
+    ctx.files.set(PLAN_SOURCE, localEdit);
+
+    const result = await ctx.archive('add-act');
+    expect(result).toMatchObject({
+      outcome: 'archived',
+      planFile: { updated: false, source: PLAN_SOURCE, reason: 'out-of-step' },
+    });
+    expect(ctx.files.get(PLAN_SOURCE)).toBe(localEdit);
+  });
+
+  test('conflict check prevents archiving action changes if requirement moved', async () => {
+    const ctx = await setup();
+    await ctx.open(
+      'act-chg',
+      [
+        '## MODIFIED Requirement: alpha {#a}',
+        '',
+        'Alpha as planned.',
+        '',
+        '### Actions',
+        '- [ ] Action 1 {#act-1}',
+      ].join('\n'),
+    );
+    await ctx.open(
+      'text-chg',
+      '## MODIFIED Requirement: alpha {#a}\n\nAlpha, completely new text.',
+    );
+    const pinned = planHeads(await ctx.state(), 'plan/p').get('a');
+
+    expect((await ctx.archive('text-chg')).outcome).toBe('archived');
+    const now = planHeads(await ctx.state(), 'plan/p').get('a');
+
+    const result = await ctx.archive('act-chg');
+    expect(result.outcome).toBe('refused');
+    expect(result.conflicts).toEqual([
+      { requirement: 'a', op: 'modify', expected: pinned, actual: now },
+    ]);
   });
 });
 

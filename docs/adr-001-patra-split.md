@@ -1,6 +1,8 @@
 # ADR-001: Presentation moves to patra; yojana keeps the meaning
 
 Status: accepted, 2026-10-03. Implementation: epic in yojana's beads (see below).
+The **Templates** part is superseded by [ADR-002](adr-002-templates-belong-to-the-app.md): the
+app owns its templates; patra is the engine.
 
 ## Context
 

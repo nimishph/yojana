@@ -1,6 +1,12 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Claim, ClaimResult, RequirementId, VerifierPort } from '@cntxt-labs/yojana-core';
+import {
+  type Claim,
+  type ClaimResult,
+  evaluateClaimOutcome,
+  type RequirementId,
+  type VerifierPort,
+} from '@cntxt-labs/yojana-core';
 import { listed } from './evidence.ts';
 
 /**
@@ -24,6 +30,31 @@ export class TextVerifier implements VerifierPort {
     this.#root = root;
   }
 
+  describe() {
+    return {
+      name: 'text',
+      version: '1.0.0',
+      kinds: [
+        {
+          kind: 'text',
+          description: 'Checks if a pattern appears in matching files',
+          expression: true,
+          params: {
+            pattern: { type: 'string' as const, required: false, description: 'Regex pattern' },
+            in: { type: 'string' as const, required: false, description: 'Path or glob to search' },
+            expression: {
+              type: 'string' as const,
+              required: false,
+              description: '<pattern> in <glob>',
+            },
+          },
+          deterministic: true,
+          version: '1.0.0',
+        },
+      ],
+    };
+  }
+
   async verify(requirement: RequirementId, claim: Claim): Promise<ClaimResult> {
     const result = (outcome: ClaimResult['outcome'], evidence: string): ClaimResult => ({
       requirement,
@@ -32,7 +63,15 @@ export class TextVerifier implements VerifierPort {
       evidence,
     });
 
-    const split = /^(.+)\s+in\s+(\S+)$/.exec(claim.expression.trim());
+    const expr = (
+      claim.expression ??
+      (claim.params?.expression as string) ??
+      (claim.params?.pattern && claim.params?.in
+        ? `${claim.params.pattern} in ${claim.params.in}`
+        : '')
+    ).trim();
+
+    const split = /^(.+)\s+in\s+(\S+)$/.exec(expr);
     if (split === null) {
       return result('unverifiable', 'write the claim as `<pattern> in <path or glob>`');
     }
@@ -56,13 +95,18 @@ export class TextVerifier implements VerifierPort {
       });
     }
     const searched = `${files.length} ${files.length === 1 ? 'file' : 'files'} searched`;
-    const found = hits.length > 0;
-    return result(
-      found === claim.expect ? 'holds' : 'violated',
-      found
-        ? `found at ${listed(hits)} (${hits.length} ${hits.length === 1 ? 'line' : 'lines'}, ${searched})`
-        : `not found (${searched})`,
-    );
+    const measurements = { count: hits.length, matches: hits };
+    const outcome = evaluateClaimOutcome(claim, { outcome: 'holds', measurements });
+    return {
+      requirement,
+      claim,
+      outcome,
+      measurements,
+      evidence:
+        hits.length > 0
+          ? `found at ${listed(hits)} (${hits.length} ${hits.length === 1 ? 'line' : 'lines'}, ${searched})`
+          : `not found (${searched})`,
+    };
   }
 
   #files(where: string): string[] {

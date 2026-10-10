@@ -1,6 +1,6 @@
 // Bundles the yojana CLI into claude-plugin/lib/, so an installed plugin (a copy of claude-plugin/
 // alone) runs without a yojana checkout: one JavaScript file for Bun, plus the files patra reads at
-// run time, which it finds next to the bundle (import.meta.dir): the review-document template and
+// run time, which it finds next to the bundle (import.meta.dir): the plan-review template and
 // the default theme. htmx is imported as text, so it is in the bundle already.
 //
 //   bun tooling/bundle-plugin.ts           write claude-plugin/lib/
@@ -32,13 +32,9 @@ async function bundle(out: string): Promise<void> {
     for (const log of result.logs) process.stderr.write(`${String(log)}\n`);
     process.exit(1);
   }
-  cpSync(
-    join(packageDir('@cntxt-labs/patra-templates'), 'review-document'),
-    join(out, 'review-document'),
-    {
-      recursive: true,
-    },
-  );
+  cpSync(join(root, 'templates', 'plan-review'), join(out, 'plan-review'), {
+    recursive: true,
+  });
   cpSync(join(packageDir('@cntxt-labs/patra-themes'), 'default'), join(out, 'default'), {
     recursive: true,
   });

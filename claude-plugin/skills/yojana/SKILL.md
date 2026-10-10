@@ -34,7 +34,8 @@ plan still matches the code.
 - **Work items.** Never close or reopen a bead yourself because a plan says the work is done.
   Propose it with `yojana decide` (without `--final`). The person finalizes it on the review page
   or with `yojana decisions --finalize`. Only then does `yojana decisions --apply` run `bd close`.
-  Do not pass `--final` or run `--apply` unless the person asks in this conversation.
+  Do not pass `--final` or run `--apply` unless the person asks in this conversation. For actions
+  without beads, propose that the person runs `yojana actions sync [plan]`; never run it unprompted.
 - **The log.** Never edit `.yojana/` by hand. It is written only by `yojana`.
 
 ## A plan file
@@ -96,6 +97,7 @@ expect: false
 | propose a decision on a bead | `yojana decide <plan> <req> <bead> close\|reopen --reason "…"` |
 | propose moving a plan (draft → accepted, …) | `yojana propose-status <plan> <status> --reason "…"` |
 | what waits on the person (bead decisions, status proposals) | `yojana decisions [--all]` |
+| create beads for unlinked actions | `yojana actions sync [plan] [--dry-run]` |
 | bring log edits back into plan files | `yojana refresh` |
 | start a plan from an existing roadmap | `yojana import <file> --id plan/<name>` |
 | review page in the browser | `/yojana:review` (Claude Code) or `/yojana-review` (opencode) |

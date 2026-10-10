@@ -1,5 +1,6 @@
 import type {
   WorkChange,
+  WorkCreateResult,
   WorkItem,
   WorkItemState,
   WorkLinkPort,
@@ -110,6 +111,28 @@ export class BdWorkLink implements WorkLinkPort {
   /** `bd reopen <id> --reason <reason>`. */
   reopen(id: string, reason: string): Promise<WorkChange> {
     return this.#change(['reopen', id, '--reason', reason]);
+  }
+
+  /** `bd create <title> [--parent <parent>] [--description <desc>] --json`. */
+  async create(options: {
+    readonly title: string;
+    readonly parent?: string | undefined;
+    readonly description?: string | undefined;
+  }): Promise<WorkCreateResult> {
+    const args = ['create', options.title, '--json'];
+    if (options.parent !== undefined) args.push('--parent', options.parent);
+    if (options.description !== undefined) args.push('--description', options.description);
+    const answer = await this.#call(args);
+    if (!answer.ok) return answer;
+    const raw = answer.value as Record<string, unknown> | null;
+    const id = raw?.id;
+    if (typeof id !== 'string' || id === '') {
+      return {
+        ok: false,
+        error: `bd create answered without an id: ${JSON.stringify(answer.value)}`,
+      };
+    }
+    return { ok: true, id };
   }
 
   /** A state change succeeds on exit 0; otherwise bd's own message is the error. */

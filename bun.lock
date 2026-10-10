@@ -21,7 +21,6 @@
       "dependencies": {
         "@cntxt-labs/patra-core": "file:../vendor/patra/cntxt-labs-patra-core-0.0.0.tgz",
         "@cntxt-labs/patra-serve": "file:../vendor/patra/cntxt-labs-patra-serve-0.0.0.tgz",
-        "@cntxt-labs/patra-templates": "file:../vendor/patra/cntxt-labs-patra-templates-0.0.0.tgz",
         "@cntxt-labs/patra-themes": "file:../vendor/patra/cntxt-labs-patra-themes-0.0.0.tgz",
         "@cntxt-labs/yojana": "workspace:*",
         "@cntxt-labs/yojana-core": "workspace:*",
@@ -41,7 +40,7 @@
       },
       "devDependencies": {
         "@cntxt-labs/patra-core": "file:../vendor/patra/cntxt-labs-patra-core-0.0.0.tgz",
-        "@cntxt-labs/patra-templates": "file:../vendor/patra/cntxt-labs-patra-templates-0.0.0.tgz",
+        "@cntxt-labs/patra-themes": "file:../vendor/patra/cntxt-labs-patra-themes-0.0.0.tgz",
       },
     },
     "yojana-core": {
@@ -111,8 +110,6 @@
     "@cntxt-labs/patra-core": ["@cntxt-labs/patra-core@./vendor/patra/cntxt-labs-patra-core-0.0.0.tgz", { "dependencies": { "@cfworker/json-schema": "4.1.1", "@types/mustache": "^4.2.6", "mustache": "4.2.0" } }, "sha512-gzK7zaJS2YbWOKB2V31E4O10MmkCM66IZdQ0VIAzMzeIH5LCYxUKOds1f6xzM7RdUXytFt9pHZ2NjXgdkIyMNA=="],
 
     "@cntxt-labs/patra-serve": ["@cntxt-labs/patra-serve@../vendor/patra/cntxt-labs-patra-serve-0.0.0.tgz", { "dependencies": { "@cntxt-labs/patra-core": "0.0.0", "htmx.org": "2.0.4" } }, "sha512-T0mNBAZ+1fHBZT3jAHxBCbeftCxpHVRVnYHTjfUqnyniw14yYAqJ8rGo2kwAFYis4oKK0Ru4JKkzG1OLaQwAlA=="],
-
-    "@cntxt-labs/patra-templates": ["@cntxt-labs/patra-templates@../vendor/patra/cntxt-labs-patra-templates-0.0.0.tgz", {}, "sha512-5MBcusfYReY+mZ3hlRBvkFCqXDyFm/Z8zmC0i2zEcdseXKwGJcLCYlzXUeXl4nQzwapB75Ma+fEGMN7VzDb21A=="],
 
     "@cntxt-labs/patra-themes": ["@cntxt-labs/patra-themes@../vendor/patra/cntxt-labs-patra-themes-0.0.0.tgz", {}, "sha512-rr/SSnKH3RcTMfP0Ihm9S67xSSF2zI+p2Gb6Wll2PUpU2/L2o5f+X7/KQnEzDP5ngiwe5w/eegVJsHlHEOQIWw=="],
 

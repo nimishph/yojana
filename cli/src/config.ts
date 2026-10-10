@@ -22,6 +22,14 @@ import { YojanaError } from '@cntxt-labs/yojana-core';
  * A path takes ${name} from vars, then from the environment, a leading ~ for the home folder, and
  * is relative to the config file. A var may use the vars before it.
  */
+export interface ExternalVerifierConfig {
+  readonly name: string;
+  readonly command: string;
+  readonly args?: readonly string[] | undefined;
+  readonly kinds?: readonly string[] | undefined;
+  readonly env?: Readonly<Record<string, string>> | undefined;
+}
+
 export interface YojanaConfig {
   /** The file read, or undefined when YOJANA_CONFIG is not set. */
   readonly path: string | undefined;
@@ -29,6 +37,7 @@ export interface YojanaConfig {
   readonly vars: Readonly<Record<string, string>>;
   readonly home: string | undefined;
   readonly theme: ThemeConfig;
+  readonly verifiers: readonly ExternalVerifierConfig[];
 }
 
 export interface ThemeConfig {
@@ -47,6 +56,7 @@ const EMPTY: YojanaConfig = {
   vars: {},
   home: undefined,
   theme: { css: undefined, fonts: {}, tokens: {}, dark: {} },
+  verifiers: [],
 };
 
 /** A token name as patra's themes spell it, without the leading dashes. */
@@ -68,7 +78,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): YojanaConfig {
   } catch (cause) {
     throw invalid(path, `is not JSON: ${(cause as Error).message}`);
   }
-  const top = record(path, raw, 'the file', ['vars', 'home', 'theme']);
+  const top = record(path, raw, 'the file', ['vars', 'home', 'theme', 'verifiers', 'adapters']);
 
   const vars: Record<string, string> = {};
   for (const [name, value] of Object.entries(record(path, top.vars ?? {}, 'vars'))) {
@@ -91,6 +101,59 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): YojanaConfig {
     fonts[role as FontRole] = cssValue(path, value, `theme.fonts.${role}`);
   }
 
+  if (top.verifiers !== undefined && !Array.isArray(top.verifiers)) {
+    throw invalid(path, 'verifiers must be an array');
+  }
+  if (top.adapters !== undefined && !Array.isArray(top.adapters)) {
+    throw invalid(path, 'adapters must be an array');
+  }
+  const verifiersRaw = [
+    ...(Array.isArray(top.verifiers) ? top.verifiers : []),
+    ...(Array.isArray(top.adapters) ? top.adapters : []),
+  ];
+  const verifiers: ExternalVerifierConfig[] = [];
+  for (let i = 0; i < verifiersRaw.length; i++) {
+    const entry = record(path, verifiersRaw[i], `verifiers[${i}]`, [
+      'name',
+      'command',
+      'args',
+      'kinds',
+      'env',
+    ]);
+    const rawCmd = text(path, entry.command, `verifiers[${i}].command`);
+    const command = expandCommandOrPath(path, rawCmd, vars, env);
+    const name =
+      entry.name === undefined
+        ? (rawCmd.split(/[/\\]/).pop() ?? 'external')
+        : text(path, entry.name, `verifiers[${i}].name`);
+    const args =
+      entry.args === undefined
+        ? undefined
+        : Array.isArray(entry.args)
+          ? (entry.args as unknown[]).map((a, j) => text(path, a, `verifiers[${i}].args[${j}]`))
+          : (() => {
+              throw invalid(path, `verifiers[${i}].args must be an array`);
+            })();
+    const kinds =
+      entry.kinds === undefined
+        ? undefined
+        : Array.isArray(entry.kinds)
+          ? (entry.kinds as unknown[]).map((k, j) => text(path, k, `verifiers[${i}].kinds[${j}]`))
+          : (() => {
+              throw invalid(path, `verifiers[${i}].kinds must be an array`);
+            })();
+    const customEnv =
+      entry.env === undefined
+        ? undefined
+        : Object.fromEntries(
+            Object.entries(record(path, entry.env, `verifiers[${i}].env`)).map(([k, v]) => [
+              k,
+              text(path, v, `verifiers[${i}].env.${k}`),
+            ]),
+          );
+    verifiers.push({ name, command, args, kinds, env: customEnv });
+  }
+
   return {
     path,
     found: true,
@@ -102,6 +165,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): YojanaConfig {
       tokens: tokens(path, theme.tokens, 'theme.tokens'),
       dark: tokens(path, theme.dark, 'theme.dark'),
     },
+    verifiers,
   };
 }
 
@@ -161,6 +225,25 @@ function expandPath(
       return found;
     });
   return resolve(dirname(file), expanded);
+}
+
+function expandCommandOrPath(
+  file: string,
+  value: string,
+  vars: Readonly<Record<string, string>>,
+  env: NodeJS.ProcessEnv,
+): string {
+  if (
+    value.startsWith('.') ||
+    value.startsWith('~') ||
+    value.startsWith('/') ||
+    value.includes('/') ||
+    value.includes('\\') ||
+    value.includes('${')
+  ) {
+    return expandPath(file, value, vars, env);
+  }
+  return value;
 }
 
 function tokens(file: string, value: unknown, at: string): Record<string, string> {

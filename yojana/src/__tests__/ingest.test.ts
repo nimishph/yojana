@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { foldLog, planHeads, YojanaError } from '@cntxt-labs/yojana-core';
+import { foldLog, planHeads, type VerifierPort, YojanaError } from '@cntxt-labs/yojana-core';
 import { MarkdownParser } from '@cntxt-labs/yojana-markdown';
 import { MemoryBaseStore, MemoryStore } from '@cntxt-labs/yojana-store';
 import { type FileReport, ingest, movement } from '../ingest.ts';
@@ -235,5 +235,243 @@ describe('ingest after a merge where both branches edited one requirement', () =
 
     const again = await ctx.run(planText({ a: 'theirs', b: 'two' }));
     expect(again).toMatchObject({ outcome: 'unchanged', requirements: [] });
+  });
+});
+
+describe('ingest with verifier schema validation', () => {
+  const verifier: VerifierPort = {
+    name: 'test-adapter',
+    kinds: ['path', 'anvesa/routes'],
+    describe: () => ({
+      name: 'test-adapter',
+      version: '1.0.0',
+      kinds: [
+        {
+          kind: 'path',
+          expression: true,
+          deterministic: true,
+        },
+        {
+          kind: 'anvesa/routes',
+          expression: false,
+          params: {
+            path: { type: 'string', required: true },
+            methods: { type: 'array', required: false },
+          },
+          deterministic: true,
+        },
+      ],
+    }),
+    verify: async (req, claim) => ({
+      requirement: req,
+      claim,
+      outcome: 'holds',
+      evidence: 'ok',
+    }),
+  };
+
+  test('a typo in claim kind fails at ingest with UNKNOWN_CLAIM_KIND', async () => {
+    const store = new MemoryStore();
+    await store.open();
+    const badKindPlan = `---
+id: plan/typo
+---
+
+## Requirement: typo {#r1}
+
+\`\`\`yojana:claim
+kind: pth
+expression: src/index.ts
+\`\`\`
+`;
+    const report = await ingest({
+      store,
+      parser,
+      bases: new MemoryBaseStore(),
+      files: [{ source: 'plans/typo.md', text: badKindPlan }],
+      actor: 'me',
+      verifiers: [verifier],
+    });
+    expect(report.files[0]?.outcome).toBe('invalid');
+    expect(report.files[0]?.issues[0]?.code).toBe('UNKNOWN_CLAIM_KIND');
+    expect(report.files[0]?.issues[0]?.message).toContain('pth');
+  });
+
+  test('a shorthand expression when unsupported fails with INVALID_CLAIM', async () => {
+    const store = new MemoryStore();
+    await store.open();
+    const badExprPlan = `---
+id: plan/bad-expr
+---
+
+## Requirement: bad expr {#r1}
+
+\`\`\`yojana:claim
+kind: anvesa/routes
+expression: /api/v1
+\`\`\`
+`;
+    const report = await ingest({
+      store,
+      parser,
+      bases: new MemoryBaseStore(),
+      files: [{ source: 'plans/bad-expr.md', text: badExprPlan }],
+      actor: 'me',
+      verifiers: [verifier],
+    });
+    expect(report.files[0]?.outcome).toBe('invalid');
+    expect(report.files[0]?.issues[0]?.code).toBe('INVALID_CLAIM');
+  });
+
+  test('missing required param or invalid param type fails with schema issues', async () => {
+    const store = new MemoryStore();
+    await store.open();
+    const badParamPlan = `---
+id: plan/bad-param
+---
+
+## Requirement: bad param {#r1}
+
+\`\`\`yojana:claim
+kind: anvesa/routes
+methods: "not-an-array"
+\`\`\`
+`;
+    const report = await ingest({
+      store,
+      parser,
+      bases: new MemoryBaseStore(),
+      files: [{ source: 'plans/bad-param.md', text: badParamPlan }],
+      actor: 'me',
+      verifiers: [verifier],
+    });
+    expect(report.files[0]?.outcome).toBe('invalid');
+    const codes = report.files[0]?.issues.map((i) => i.code);
+    expect(codes).toContain('MISSING_CLAIM_PARAM');
+    expect(codes).toContain('INVALID_CLAIM_PARAM');
+  });
+
+  test('unknown param fails with UNKNOWN_CLAIM_PARAM', async () => {
+    const store = new MemoryStore();
+    await store.open();
+    const unknownParamPlan = `---
+id: plan/unknown-param
+---
+
+## Requirement: unknown param {#r1}
+
+\`\`\`yojana:claim
+kind: anvesa/routes
+path: /api/v1
+bogus: true
+\`\`\`
+`;
+    const report = await ingest({
+      store,
+      parser,
+      bases: new MemoryBaseStore(),
+      files: [{ source: 'plans/unknown-param.md', text: unknownParamPlan }],
+      actor: 'me',
+      verifiers: [verifier],
+    });
+    expect(report.files[0]?.outcome).toBe('invalid');
+    expect(report.files[0]?.issues[0]?.code).toBe('UNKNOWN_CLAIM_PARAM');
+  });
+
+  test('valid claims pass ingest and record', async () => {
+    const store = new MemoryStore();
+    await store.open();
+    const validPlan = `---
+id: plan/valid
+---
+
+## Requirement: valid {#r1}
+
+\`\`\`yojana:claim
+kind: anvesa/routes
+path: /api/v1
+methods:
+  - GET
+\`\`\`
+`;
+    const report = await ingest({
+      store,
+      parser,
+      bases: new MemoryBaseStore(),
+      files: [{ source: 'plans/valid.md', text: validPlan }],
+      actor: 'me',
+      verifiers: [verifier],
+    });
+    expect(report.files[0]?.outcome).toBe('recorded');
+    expect(report.files[0]?.issues).toEqual([]);
+  });
+
+  test('valid composite claims pass ingest and record', async () => {
+    const store = new MemoryStore();
+    await store.open();
+    const compositePlan = `---
+id: plan/valid-composite
+---
+
+## Requirement: valid composite {#r1}
+
+\`\`\`yojana:claim
+kind: all
+claims:
+  - kind: anvesa/routes
+    path: /api/v1
+    methods:
+      - GET
+  - kind: not
+    claim:
+      kind: anvesa/routes
+      path: /api/v2
+      methods:
+        - POST
+\`\`\`
+`;
+    const report = await ingest({
+      store,
+      parser,
+      bases: new MemoryBaseStore(),
+      files: [{ source: 'plans/composite.md', text: compositePlan }],
+      actor: 'me',
+      verifiers: [verifier],
+    });
+    expect(report.files[0]?.outcome).toBe('recorded');
+    expect(report.files[0]?.issues).toEqual([]);
+  });
+
+  test('composite claim with unknown child kind fails ingest', async () => {
+    const store = new MemoryStore();
+    await store.open();
+    const badPlan = `---
+id: plan/bad-composite
+---
+
+## Requirement: bad composite {#r1}
+
+\`\`\`yojana:claim
+kind: all
+claims:
+  - kind: anvesa/routes
+    path: /api/v1
+    methods:
+      - GET
+  - kind: mystery/nonexistent
+    expression: foo
+\`\`\`
+`;
+    const report = await ingest({
+      store,
+      parser,
+      bases: new MemoryBaseStore(),
+      files: [{ source: 'plans/bad.md', text: badPlan }],
+      actor: 'me',
+      verifiers: [verifier],
+    });
+    expect(report.files[0]?.outcome).toBe('invalid');
+    expect(report.files[0]?.issues[0]?.code).toBe('UNKNOWN_CLAIM_KIND');
+    expect(report.files[0]?.issues[0]?.message).toContain('mystery/nonexistent');
   });
 });

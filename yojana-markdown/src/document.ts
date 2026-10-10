@@ -1,4 +1,7 @@
 import {
+  type Action,
+  actionsRevision,
+  assertActionId,
   assertRequirementId,
   type Claim,
   normalizeContent,
@@ -28,6 +31,9 @@ const REQUIREMENT_HEADING =
   /^##\s+(?:(ADDED|MODIFIED|REMOVED)\s+)?Requirement:\s*(.*?)\s*(?:\{#([^}]*)\})?\s*$/;
 const LEVEL2_HEADING = /^##\s/;
 const TITLE_HEADING = /^#\s+(.*?)\s*#*\s*$/;
+const ACTIONS_HEADING = /^###\s+Actions\s*$/i;
+const LEVEL3_HEADING = /^###\s/;
+const ACTION_ITEM = /^[-*]\s+(?:\[[ xX]\]\s+)?(.*?)(?:\s*\{#([^}]*)\})?\s*$/;
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})\s*([^\s`]*)/;
 const FRONTMATTER_FENCE = '---';
 /** git's conflict markers; inside a code fence they are example text and left alone. */
@@ -61,6 +67,14 @@ interface Fence {
   readonly body: string[];
 }
 
+interface ActionDraft {
+  readonly id: string | undefined;
+  text: string;
+  readonly attributes: readonly string[];
+  readonly line: number;
+  readonly claims: Claim[];
+}
+
 interface RequirementDraft {
   readonly op: Op | undefined;
   readonly title: string;
@@ -70,6 +84,8 @@ interface RequirementDraft {
   readonly line: number;
   readonly lines: string[];
   readonly claims: Claim[];
+  inActions: boolean;
+  readonly actions: ActionDraft[];
 }
 
 type Section =
@@ -150,7 +166,21 @@ export function parseDocument(input: string, issue: IssueSink): ParsedDocument |
       return;
     }
     const claim = parseClaim(block, issue);
-    if (claim !== undefined) section.draft.claims.push(claim);
+    if (claim === undefined) return;
+    if (section.draft.inActions) {
+      const lastAction = section.draft.actions[section.draft.actions.length - 1];
+      if (lastAction === undefined) {
+        issue(
+          block.line,
+          'CLAIM_WITHOUT_ACTION',
+          'a claim under ### Actions must follow an action item',
+        );
+      } else {
+        lastAction.claims.push(claim);
+      }
+    } else {
+      section.draft.claims.push(claim);
+    }
   };
 
   for (let i = closing + 1; i < lines.length; i++) {
@@ -207,6 +237,8 @@ export function parseDocument(input: string, issue: IssueSink): ParsedDocument |
           line: lineNo,
           lines: [],
           claims: [],
+          inActions: false,
+          actions: [],
         },
       });
       sawContent = true;
@@ -217,6 +249,44 @@ export function parseDocument(input: string, issue: IssueSink): ParsedDocument |
       sections.push({ kind: 'prose', lines: [line] });
       sawContent = true;
       continue;
+    }
+
+    const cur = current();
+    if (cur.kind === 'requirement') {
+      if (ACTIONS_HEADING.test(line)) {
+        cur.draft.inActions = true;
+        sawContent = true;
+        continue;
+      }
+      if (cur.draft.inActions) {
+        if (LEVEL3_HEADING.test(line)) {
+          cur.draft.inActions = false;
+        } else if (line.trim() === '') {
+          continue;
+        } else {
+          const actMatch = ACTION_ITEM.exec(line);
+          if (actMatch !== null) {
+            const [id, ...attributes] = (actMatch[2] ?? '').trim().split(/\s+/);
+            cur.draft.actions.push({
+              id: actMatch[2] === undefined ? undefined : id,
+              text: (actMatch[1] ?? '').trim(),
+              attributes: attributes.filter((a) => a !== ''),
+              line: lineNo,
+              claims: [],
+            });
+            sawContent = true;
+            continue;
+          }
+          if (cur.draft.actions.length > 0) {
+            const lastAct = cur.draft.actions[cur.draft.actions.length - 1];
+            if (lastAct !== undefined) {
+              lastAct.text = `${lastAct.text} ${line.trim()}`;
+            }
+            sawContent = true;
+            continue;
+          }
+        }
+      }
     }
 
     if (line.trim() !== '') sawContent = true;
@@ -272,11 +342,70 @@ export function parseDocument(input: string, issue: IssueSink): ParsedDocument |
       }
     }
     if (badAttribute) continue;
+
+    const seenActions = new Map<string, number>();
+    const parsedActions: Action[] = [];
+    let badAction = false;
+    for (const actDraft of draft.actions) {
+      if (actDraft.id === undefined || actDraft.id === '') {
+        issue(actDraft.line, 'MISSING_ACTION_ID', 'add an id: - <text> {#act-id}');
+        badAction = true;
+        continue;
+      }
+      try {
+        assertActionId(actDraft.id);
+      } catch (error) {
+        issue(actDraft.line, 'INVALID_ACTION_ID', String(error));
+        badAction = true;
+        continue;
+      }
+      const firstAct = seenActions.get(actDraft.id);
+      if (firstAct !== undefined) {
+        issue(
+          actDraft.line,
+          'DUPLICATE_ACTION_ID',
+          `id ${actDraft.id} is already used on line ${firstAct}`,
+        );
+        badAction = true;
+        continue;
+      }
+      seenActions.set(actDraft.id, actDraft.line);
+      let actionWorkItems: string[] = [];
+      let badActionAttr = false;
+      for (const attr of actDraft.attributes) {
+        const [key, value = ''] = attr.split('=', 2);
+        if ((key === 'bead' || key === 'beads') && value !== '') {
+          actionWorkItems = value.split(',').filter((b) => b !== '');
+        } else {
+          issue(
+            actDraft.line,
+            'INVALID_ACTION_ATTRIBUTE',
+            `"${attr}" is not understood; known: bead=<id> or beads=<id>[,<id>...]`,
+          );
+          badActionAttr = true;
+        }
+      }
+      if (badActionAttr) {
+        badAction = true;
+        continue;
+      }
+      parsedActions.push({
+        id: actDraft.id,
+        text: actDraft.text,
+        ...(actionWorkItems.length > 0 ? { workItems: actionWorkItems } : {}),
+        ...(actDraft.claims.length > 0 ? { claims: actDraft.claims } : {}),
+      });
+    }
+    if (badAction) continue;
+
+    const actions = parsedActions.length > 0 ? parsedActions : undefined;
+    const actionsRev = actions !== undefined ? actionsRevision(draft.id, actions) : undefined;
     const fields = {
       id: draft.id,
       title: draft.title,
       text: normalizeContent(draft.lines.join('\n')),
       claims: draft.claims,
+      ...(actions !== undefined ? { actions, actionsRevision: actionsRev } : {}),
       ...(workItems.length > 0 ? { workItems } : {}),
     };
     parts.push({
@@ -298,25 +427,164 @@ function parseClaim(block: Fence, issue: IssueSink): Claim | undefined {
     issue(block.line, 'INVALID_CLAIM', `claim is not valid YAML: ${String(error)}`);
     return undefined;
   }
+  return parseClaimRecord(raw, block.line, issue);
+}
+
+function parseClaimRecord(raw: unknown, line: number, issue: IssueSink): Claim | undefined {
   if (!isRecord(raw)) {
-    issue(block.line, 'INVALID_CLAIM', 'a claim is a mapping with kind, expression and expect');
+    issue(line, 'INVALID_CLAIM', 'a claim is a mapping with kind, expression/params and expect');
     return undefined;
   }
-  const { kind, expression } = raw;
+
+  let kind: string | undefined;
+  if (typeof raw.kind === 'string' && raw.kind.trim() !== '') {
+    kind = raw.kind.trim();
+  } else if ('all' in raw) {
+    kind = 'all';
+  } else if ('any' in raw) {
+    kind = 'any';
+  } else if ('not' in raw) {
+    kind = 'not';
+  }
+
+  if (kind === undefined) {
+    issue(line, 'INVALID_CLAIM', 'claim needs a non-empty string `kind`');
+    return undefined;
+  }
+
+  if (kind === 'all' || kind === 'any') {
+    let rawChildren = raw.claims;
+    if (rawChildren === undefined && kind === 'all') rawChildren = raw.all;
+    if (rawChildren === undefined && kind === 'any') rawChildren = raw.any;
+
+    if (!Array.isArray(rawChildren)) {
+      issue(
+        line,
+        'INVALID_CLAIM',
+        `"${kind}" claim requires a list of child claims under "claims"`,
+      );
+      return undefined;
+    }
+    if (rawChildren.length === 0) {
+      issue(line, 'INVALID_CLAIM', `"${kind}" claim requires at least one child claim`);
+      return undefined;
+    }
+
+    const childClaims: Claim[] = [];
+    for (const childRaw of rawChildren) {
+      const child = parseClaimRecord(childRaw, line, issue);
+      if (child === undefined) return undefined;
+      childClaims.push(child);
+    }
+
+    const expect = raw.expect ?? true;
+    if (typeof expect !== 'boolean' && !isRecord(expect)) {
+      issue(line, 'INVALID_CLAIM', '`expect` must be boolean or a predicate mapping');
+      return undefined;
+    }
+
+    return {
+      kind,
+      claims: childClaims,
+      expect,
+    };
+  }
+
+  if (kind === 'not') {
+    let rawChild: unknown = raw.claim;
+    if (rawChild === undefined && 'not' in raw) {
+      rawChild = raw.not;
+    }
+    if (rawChild === undefined && 'claims' in raw) {
+      if (Array.isArray(raw.claims)) {
+        if (raw.claims.length === 1) {
+          rawChild = raw.claims[0];
+        } else {
+          issue(
+            line,
+            'INVALID_CLAIM',
+            '"not" claim requires a single child claim (use "all" or "any" to combine multiple)',
+          );
+          return undefined;
+        }
+      } else {
+        rawChild = raw.claims;
+      }
+    }
+    if (Array.isArray(rawChild)) {
+      if (rawChild.length === 1) {
+        rawChild = rawChild[0];
+      } else {
+        issue(
+          line,
+          'INVALID_CLAIM',
+          '"not" claim requires a single child claim (use "all" or "any" to combine multiple)',
+        );
+        return undefined;
+      }
+    }
+    if (!isRecord(rawChild)) {
+      issue(line, 'INVALID_CLAIM', '"not" claim requires a child claim');
+      return undefined;
+    }
+
+    const child = parseClaimRecord(rawChild, line, issue);
+    if (child === undefined) return undefined;
+
+    const expect = raw.expect ?? true;
+    if (typeof expect !== 'boolean' && !isRecord(expect)) {
+      issue(line, 'INVALID_CLAIM', '`expect` must be boolean or a predicate mapping');
+      return undefined;
+    }
+
+    return {
+      kind: 'not',
+      claims: [child],
+      expect,
+    };
+  }
+
+  let expression: string | undefined;
+  if ('expression' in raw) {
+    if (typeof raw.expression !== 'string' || raw.expression.trim() === '') {
+      issue(line, 'INVALID_CLAIM', '`expression` must be a non-empty string');
+      return undefined;
+    }
+    expression = raw.expression.trim();
+  }
+
+  const params: Record<string, unknown> = {};
+  if ('params' in raw) {
+    if (isRecord(raw.params)) {
+      Object.assign(params, raw.params);
+    } else {
+      issue(line, 'INVALID_CLAIM', '`params` must be a mapping');
+      return undefined;
+    }
+  }
+  for (const [key, val] of Object.entries(raw)) {
+    if (key !== 'kind' && key !== 'expression' && key !== 'expect' && key !== 'params') {
+      params[key] = val;
+    }
+  }
+
   const expect = raw.expect ?? true;
-  if (typeof kind !== 'string' || kind.trim() === '') {
-    issue(block.line, 'INVALID_CLAIM', 'claim needs a non-empty string `kind`');
+  if (typeof expect !== 'boolean' && !isRecord(expect)) {
+    issue(line, 'INVALID_CLAIM', '`expect` must be boolean or a predicate mapping');
     return undefined;
   }
-  if (typeof expression !== 'string' || expression.trim() === '') {
-    issue(block.line, 'INVALID_CLAIM', 'claim needs a non-empty string `expression`');
+
+  if (expression === undefined && Object.keys(params).length === 0) {
+    issue(line, 'INVALID_CLAIM', 'claim needs an `expression` or parameters');
     return undefined;
   }
-  if (typeof expect !== 'boolean') {
-    issue(block.line, 'INVALID_CLAIM', '`expect` must be true or false');
-    return undefined;
-  }
-  return { kind: kind.trim(), expression: expression.trim(), expect };
+
+  return {
+    kind,
+    ...(expression !== undefined ? { expression } : {}),
+    ...(Object.keys(params).length > 0 ? { params } : {}),
+    expect,
+  };
 }
 
 /** Title rule shared by plans and changes: frontmatter wins, and an H1 must agree with it. */

@@ -222,13 +222,18 @@ describe('yojana CLI, start to finish', () => {
   test('decide proposes, decisions finalizes and applies; a missing bd is recorded as a failure', async () => {
     writeFileSync(
       join(root, 'plans', 'work.md'),
-      '---\nid: plan/work\n---\n\n## Requirement: done {#done beads=w-1}\n\nIt is done.\n',
+      '---\nid: plan/work\n---\n\n## Requirement: done {#done beads=w-1}\n\nIt is done.\n\n### Actions\n- Action work {#act-work bead=w-act}\n',
     );
     expect((await yojana('ingest')).code).toBe(0);
     expect((await yojana('decide', 'plan/work', 'done', 'w-1', 'close')).code).toBe(2);
     expect(
       (await yojana('decide', 'plan/work', 'done', 'w-9', 'close', '--reason', 'x')).out,
     ).toContain('NOT_LINKED');
+    // An item linked to an action under the requirement can also be decided on
+    expect(
+      (await yojana('decide', 'plan/work', 'done', 'w-act', 'close', '--reason', 'action done'))
+        .out,
+    ).toContain('proposed; a person finalizes it');
 
     const proposed = await yojana(
       'decide',
@@ -249,6 +254,18 @@ describe('yojana CLI, start to finish', () => {
     expect(applied.code).toBe(1);
     expect(applied.out).toContain(`${id}  failed: could not run bd`);
     expect((await yojana('decisions')).out).toContain(`${id}  failed`);
+  });
+
+  test('actions sync creates beads for unlinked actions or runs dry-run', async () => {
+    writeFileSync(
+      join(root, 'plans', 'unlinked.md'),
+      '---\nid: plan/unlinked\nbeads: [u-epic]\n---\n\n## Requirement: r1 {#r1}\n\n### Actions\n- Task 1 {#act-1}\n',
+    );
+    // dry-run does not modify file
+    const dry = await yojana('actions', 'sync', 'plan/unlinked', '--dry-run');
+    expect(dry.code).toBe(0);
+    expect(dry.out).toContain('would create "Task 1"');
+    expect(readFileSync(join(root, 'plans', 'unlinked.md'), 'utf8')).not.toContain('bead=');
   });
 
   test('an agent proposes a status and cannot decide it; a person finalizes or declines', async () => {
@@ -376,5 +393,17 @@ describe('yojana primer and skill', () => {
       'name: yojana',
     );
     expect((await yojana('skill')).code).toBe(2);
+  });
+});
+
+describe('yojana rules propose', () => {
+  test('proposes realized requirements as rules, supporting --dry-run', async () => {
+    const dryRun = await yojana('rules', 'propose', '--dry-run');
+    expect(dryRun.code).toBe(0);
+    expect(dryRun.out).toMatch(/skipped \d+ requirements/);
+
+    const alias = await yojana('propose-rules', '--dry-run');
+    expect(alias.code).toBe(0);
+    expect(alias.out).toMatch(/skipped \d+ requirements/);
   });
 });

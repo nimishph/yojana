@@ -1,0 +1,8 @@
+<article class="card change" data-patra-part="change" data-patra-key="{{id}}">
+  <div class="who"><b>{{title}}</b>{{#author}}<span>{{author}}</span>{{/author}}{{#when}}<span>{{when}}</span>{{/when}}</div>
+  {{#status}}<span class="chip {{intent}}">{{label}}</span>{{/status}}
+  {{#diffs}}<div class="diff"><a class="small" href="#{{section}}">{{label}}</a><div>{{diff}}</div></div>{{/diffs}}
+  {{#why}}<p class="muted">Why: {{why}}</p>{{/why}}
+  <div class="actions live-only">{{#applies}}<button type="button" class="primary" data-patra-action="accept">Accept</button>{{/applies}}<button type="button" data-patra-action="reject">Reject</button></div>
+  <div class="slot" data-patra-slot></div>
+</article>

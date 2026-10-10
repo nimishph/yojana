@@ -1,4 +1,4 @@
-import type { ChangeDraft, Claim, Plan, Requirement } from '@cntxt-labs/yojana-core';
+import type { Action, ChangeDraft, Claim, Plan, Requirement } from '@cntxt-labs/yojana-core';
 
 /**
  * A YAML scalar that reads back as the same string. Plain whenever the YAML parser gives the value
@@ -17,15 +17,77 @@ function yamlString(value: string): string {
   }
 }
 
-/** `expect` is written only when false: true is the default, and authors leave it out. */
+function renderYamlMapping(obj: Record<string, unknown>, indent = ''): string[] {
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === 'object') {
+      if (Array.isArray(value)) {
+        lines.push(
+          `${indent}${key}: [${value.map((v) => (typeof v === 'string' ? yamlString(v) : JSON.stringify(v))).join(', ')}]`,
+        );
+      } else {
+        lines.push(`${indent}${key}:`);
+        lines.push(...renderYamlMapping(value as Record<string, unknown>, `${indent}  `));
+      }
+    } else if (typeof value === 'string') {
+      lines.push(`${indent}${key}: ${yamlString(value)}`);
+    } else {
+      lines.push(`${indent}${key}: ${value}`);
+    }
+  }
+  return lines;
+}
+
+function renderClaimBody(claim: Claim, indent = ''): string[] {
+  const lines: string[] = [`${indent}kind: ${yamlString(claim.kind)}`];
+  if (claim.expression !== undefined && claim.expression.trim() !== '') {
+    lines.push(`${indent}expression: ${yamlString(claim.expression)}`);
+  }
+  if (claim.params !== undefined && Object.keys(claim.params).length > 0) {
+    lines.push(...renderYamlMapping(claim.params as Record<string, unknown>, indent));
+  }
+  if (claim.claims !== undefined && claim.claims.length > 0) {
+    if (claim.kind === 'not' && claim.claims.length === 1 && claim.claims[0] !== undefined) {
+      lines.push(`${indent}claim:`);
+      lines.push(...renderClaimBody(claim.claims[0], `${indent}  `));
+    } else {
+      lines.push(`${indent}claims:`);
+      for (const child of claim.claims) {
+        const childLines = renderClaimBody(child, `${indent}    `);
+        if (childLines.length > 0 && childLines[0] !== undefined) {
+          lines.push(`${indent}  - ${childLines[0].trimStart()}`);
+          for (const remaining of childLines.slice(1)) {
+            lines.push(remaining);
+          }
+        }
+      }
+    }
+  }
+  if (claim.expect === false) {
+    lines.push(`${indent}expect: false`);
+  } else if (typeof claim.expect === 'object' && claim.expect !== null) {
+    lines.push(`${indent}expect:`);
+    lines.push(...renderYamlMapping(claim.expect as Record<string, unknown>, `${indent}  `));
+  }
+  return lines;
+}
+
+/** `expect` is written only when not true: true is the default, and authors leave it out. */
 function renderClaim(claim: Claim): string {
-  return [
-    '```yojana:claim',
-    `kind: ${yamlString(claim.kind)}`,
-    `expression: ${yamlString(claim.expression)}`,
-    ...(claim.expect ? [] : ['expect: false']),
-    '```',
-  ].join('\n');
+  const lines = ['```yojana:claim', ...renderClaimBody(claim), '```'];
+  return lines.join('\n');
+}
+
+function renderAction(action: Action): string {
+  const work = action.workItems ?? [];
+  const links =
+    work.length === 1 ? ` bead=${work[0]}` : work.length > 1 ? ` beads=${work.join(',')}` : '';
+  const lines = [`- ${action.text} {#${action.id}${links}}`];
+  if (action.claims !== undefined && action.claims.length > 0) {
+    for (const claim of action.claims) lines.push(renderClaim(claim));
+  }
+  return lines.join('\n');
 }
 
 function renderRequirement(requirement: Requirement, marker = ''): string {
@@ -34,6 +96,9 @@ function renderRequirement(requirement: Requirement, marker = ''): string {
   const blocks = [`## ${marker}Requirement: ${requirement.title} {#${requirement.id}${links}}`];
   if (requirement.text !== '') blocks.push(requirement.text);
   for (const claim of requirement.claims) blocks.push(renderClaim(claim));
+  if (requirement.actions !== undefined && requirement.actions.length > 0) {
+    blocks.push(`### Actions\n\n${requirement.actions.map(renderAction).join('\n')}`);
+  }
   return blocks.join('\n\n');
 }
 

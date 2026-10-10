@@ -1,0 +1,27 @@
+<section class="sec" id="{{id}}" data-patra-part="section" data-patra-key="{{id}}" data-patra-version="{{version}}" data-patra-tags="{{#tags}}{{.}} {{/tags}}">
+  <header class="sec-head"><h2>{{title}}</h2><a class="anchor" href="#{{id}}">#{{id}}</a></header>
+  {{#properties.length}}<div class="props">{{#properties}}<span class="chip {{intent}}">{{label}}</span>{{/properties}}</div>{{/properties.length}}
+  {{#flags}}<div class="flag {{intent}}"><span>{{text}}</span>{{#buttons}}<button type="button" class="live-only{{#primary}} primary{{/primary}}" data-patra-action="{{action}}" data-patra-item="{{item}}" data-patra-decision="{{decision}}">{{label}}</button>{{/buttons}}</div>{{/flags}}
+  <div class="sec-body{{#proposed}} has-change{{/proposed}}" data-patra-select>{{body}}</div>
+  {{#proposed}}<div class="sec-body when-change">{{proposed}}</div>{{/proposed}}
+  {{#actions.length}}
+  <div class="sec-actions">
+    <div class="sec-actions-title">Actions</div>
+    <ul class="sec-actions-list">
+      {{#actions}}
+      <li class="sec-action{{#done}} is-done{{/done}}" data-action-id="{{id}}">
+        <span class="action-check">{{#done}}✓{{/done}}{{^done}}○{{/done}}</span>
+        <span class="action-text">{{text}}</span>
+        <span class="action-id">#{{id}}</span>
+        {{#items.length}}<span class="action-chips">{{#items}}<span class="chip {{intent}}">{{label}}</span>{{/items}}</span>{{/items.length}}
+        {{#claims.length}}<span class="action-chips">{{#claims}}<span class="chip {{intent}}">{{label}}</span>{{/claims}}</span>{{/claims.length}}
+        {{#note}}<span class="chip warning">{{note}}</span>{{/note}}
+      </li>
+      {{/actions}}
+    </ul>
+  </div>
+  {{/actions.length}}
+  {{#evidence.length}}<ul class="evidence">{{#evidence}}<li class="{{intent}}">{{label}}</li>{{/evidence}}</ul>{{/evidence.length}}
+  <div class="actions live-only">{{#buttons}}<button type="button" class="{{#primary}}primary{{/primary}}" data-patra-action="{{action}}" data-patra-item="{{item}}" data-patra-decision="{{decision}}">{{label}}</button>{{/buttons}}<button type="button" class="when-edit" data-patra-action="edit">Edit</button><button type="button" class="when-suggest" data-patra-action="suggest">Suggest edit</button><button type="button" data-patra-action="comment">Comment</button></div>
+  <div class="slot" data-patra-slot></div>
+</section>

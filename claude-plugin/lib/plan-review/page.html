@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{document.title}}</title>
+{{patra.head}}
+</head>
+<body>
+<div class="rd" data-mode="{{document.mode}}" data-patra-document="{{document.id}}">
+  <header class="rd-bar">
+    <div class="rd-heading">
+      {{#document.crumbs}}<span class="rd-crumbs">{{document.crumbs}}</span>{{/document.crumbs}}
+      <div class="rd-title">
+        <h1>{{document.title}}</h1>
+        {{#document.status}}<span class="chip {{intent}}">{{label}}</span>{{/document.status}}
+        <span class="chip saved-only" title="A saved copy of the page: nothing here can be changed. Open the live page to comment, edit or decide.">saved copy · read only</span>
+        {{#document.metrics}}<span class="chip {{intent}}">{{#meter}}<meter min="0" max="{{max}}" value="{{value}}"></meter>{{/meter}}{{label}}</span>{{/document.metrics}}
+      </div>
+    </div>
+    <div class="rd-tools live-only">
+      <fieldset class="seg">
+        <legend class="visually-hidden">Mode</legend>
+        <button type="button" data-patra-mode="read">Read</button>
+        <button type="button" data-patra-mode="suggest">Suggest</button>
+        <button type="button" data-patra-mode="edit">Edit</button>
+      </fieldset>
+    </div>
+  </header>
+
+  <div class="rd-body">
+    <nav class="rd-outline" aria-label="Sections">
+      {{#filters.length}}<div class="label">Show</div>
+      <div class="rd-filters">{{#filters}}<button type="button" class="filter" data-patra-filter="{{id}}" data-active="{{#active}}true{{/active}}">{{label}} {{count}}</button>{{/filters}}</div>{{/filters.length}}
+      <div class="label">Sections</div>
+      <ul class="rd-toc">{{#sections}}{{> outline-item}}{{/sections}}</ul>
+      {{#document.source}}<div class="rd-source"><span>{{document.source}}</span>{{#document.freshness}}<span>{{document.freshness}}</span>{{/document.freshness}}<button type="button" class="link live-only" data-patra-refresh>Refresh</button></div>{{/document.source}}
+    </nav>
+
+    <main class="rd-page">
+      {{#document.banner}}<p class="banner {{intent}}" role="status">{{label}}</p>{{/document.banner}}
+      {{#callouts}}{{> callout}}{{/callouts}}
+      {{#document.intro}}<div class="rd-intro">{{document.intro}}</div>{{/document.intro}}
+      {{#sections}}{{> section}}{{/sections}}
+    </main>
+
+    <aside class="rd-rail" aria-label="Review" data-patra-tabs>
+      <div class="rd-tabs" role="tablist">
+        <button type="button" role="tab" data-patra-tab="threads">Threads <span class="n">{{threads.length}}</span></button>
+        <button type="button" role="tab" data-patra-tab="changes">Changes <span class="n">{{changes.length}}</span></button>
+        <button type="button" role="tab" data-patra-tab="activity">Activity</button>
+      </div>
+      <div class="rd-panel" data-patra-panel="threads">
+        <h2 class="panel-title">Threads</h2>
+        {{#threads}}{{> thread}}{{/threads}}
+        {{^threads}}<p class="muted">No threads. <span class="live-only">Select text in a section to start one.</span><span class="saved-only">This is a saved copy: comments are made on the live page.</span></p>{{/threads}}
+      </div>
+      <div class="rd-panel" data-patra-panel="changes">
+        <h2 class="panel-title">Changes</h2>
+        {{#changes}}{{> change}}{{/changes}}
+        {{^changes}}<p class="muted">No open changes.</p>{{/changes}}
+      </div>
+      <div class="rd-panel" data-patra-panel="activity">
+        <h2 class="panel-title">Activity</h2>
+        <ul class="feed">{{#activity}}{{> activity-item}}{{/activity}}</ul>
+        {{^activity}}<p class="muted">Nothing yet.</p>{{/activity}}
+      </div>
+    </aside>
+  </div>
+</div>
+{{patra.foot}}
+</body>
+</html>

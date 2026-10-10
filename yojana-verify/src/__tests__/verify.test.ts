@@ -174,6 +174,188 @@ describe('AnvesaVerifier: dependents', () => {
   });
 });
 
+describe('AnvesaVerifier: namespaced kinds (anvesa.wql, anvesa.dependents)', () => {
+  test('anvesa.wql runs syntactic query', async () => {
+    const seen: string[][] = [];
+    const result = await new AnvesaVerifier(runner(queryHit, seen)).verify(
+      'r',
+      claim('anvesa.wql', '//class[@name="CommandFailedError"]'),
+    );
+    expect(result).toMatchObject({ outcome: 'holds', evidence: 'matches cli/src/errors.ts:8' });
+    expect(seen[0]).toEqual(['query', '//class[@name="CommandFailedError"]', '--limit', '1']);
+  });
+
+  test('anvesa.dependents runs dependency query', async () => {
+    const seen: string[][] = [];
+    const result = await new AnvesaVerifier(runner(dependents, seen)).verify(
+      'r',
+      claim('anvesa.dependents', 'core/src/index.ts'),
+    );
+    expect(result).toMatchObject({ outcome: 'holds' });
+    expect(seen[0]?.slice(0, 2)).toEqual(['dependents', 'core/src/index.ts']);
+  });
+});
+
+describe('AnvesaVerifier: callers', () => {
+  const callersHit = {
+    symbol: { id: 's1', name: 'validate', path: 'src/config.ts', line: 10 },
+    callers: {
+      items: [
+        { from: 'src/server.ts#startServer', path: 'src/server.ts', line: 42 },
+        { from: 'src/cli.ts#main', path: 'src/cli.ts', line: 15 },
+      ],
+      total: 2,
+    },
+  };
+
+  const callersEmpty = {
+    symbol: { id: 's2', name: 'unusedHelper', path: 'src/dead.ts', line: 5 },
+    callers: {
+      items: [],
+      total: 0,
+    },
+  };
+
+  test('dead code check: count == 0 holds when unused, violated when called', async () => {
+    const emptyVerifier = new AnvesaVerifier(runner(callersEmpty));
+    const deadClaim: Claim = {
+      kind: 'anvesa.callers',
+      params: { symbol: 'unusedHelper' },
+      expect: { count: { eq: 0 } },
+    };
+    const emptyRes = await emptyVerifier.verify('r', deadClaim);
+    expect(emptyRes.outcome).toBe('holds');
+    expect(emptyRes.evidence).toBe('no callers for unusedHelper');
+
+    const hitVerifier = new AnvesaVerifier(runner(callersHit));
+    const hitRes = await hitVerifier.verify('r', deadClaim);
+    expect(hitRes.outcome).toBe('violated');
+    expect(hitRes.evidence).toContain(
+      'called by src/server.ts#startServer, src/cli.ts#main (2 callers)',
+    );
+  });
+
+  test('resolvedOnly option passes --resolved-only flag', async () => {
+    const seen: string[][] = [];
+    const verifier = new AnvesaVerifier(runner(callersHit, seen));
+    const claimWithResolved: Claim = {
+      kind: 'anvesa.callers',
+      params: { symbol: 'validate', resolvedOnly: true },
+      expect: { count: { gte: 1 } },
+    };
+    const res = await verifier.verify('r', claimWithResolved);
+    expect(res.outcome).toBe('holds');
+    expect(seen[0]).toContain('--resolved-only');
+  });
+});
+
+describe('AnvesaVerifier: callees', () => {
+  const calleesHit = {
+    symbol: { id: 's1', name: 'startServer', path: 'src/server.ts', line: 42 },
+    callees: {
+      items: [{ to: 'src/config.ts#validate', path: 'src/config.ts', line: 10 }],
+      total: 1,
+    },
+  };
+
+  test('counts callees with predicate', async () => {
+    const seen: string[][] = [];
+    const verifier = new AnvesaVerifier(runner(calleesHit, seen));
+    const claimCallees: Claim = {
+      kind: 'anvesa.callees',
+      params: { symbol: 'startServer' },
+      expect: { count: { eq: 1 } },
+    };
+    const res = await verifier.verify('r', claimCallees);
+    expect(res.outcome).toBe('holds');
+    expect(res.evidence).toBe('calls src/config.ts#validate (1 callee)');
+    expect(seen[0]?.slice(0, 2)).toEqual(['callees', 'startServer']);
+  });
+});
+
+describe('AnvesaVerifier: routes', () => {
+  const routesData = [
+    {
+      id: 'r1',
+      path: 'src/server.ts',
+      method: 'GET',
+      route: '/api/users',
+      handler: 'listUsers',
+      line: 20,
+      framework: 'express',
+    },
+    {
+      id: 'r2',
+      path: 'src/server.ts',
+      method: 'POST',
+      route: '/api/users',
+      handler: 'createUser',
+      line: 30,
+      framework: 'express',
+    },
+  ];
+
+  test('measures discovered endpoint routes and evaluates count predicates', async () => {
+    const seen: string[][] = [];
+    const verifier = new AnvesaVerifier(runner(routesData, seen));
+    const claimRoutes: Claim = {
+      kind: 'anvesa.routes',
+      params: { method: 'GET', path: '/api/users', framework: 'express' },
+      expect: { count: { gte: 1 } },
+    };
+    const res = await verifier.verify('r', claimRoutes);
+    expect(res.outcome).toBe('holds');
+    expect(res.evidence).toContain('GET /api/users');
+    expect(seen[0]).toEqual(['routes', 'GET', '/api/users', '--framework', 'express']);
+  });
+
+  test('shorthand expression parses method and path', async () => {
+    const seen: string[][] = [];
+    const verifier = new AnvesaVerifier(runner(routesData, seen));
+    const claimExpr: Claim = {
+      kind: 'anvesa.routes',
+      expression: 'POST /api/users',
+      expect: true,
+    };
+    const res = await verifier.verify('r', claimExpr);
+    expect(res.outcome).toBe('holds');
+    expect(seen[0]).toEqual(['routes', 'POST', '/api/users']);
+  });
+});
+
+describe('AnvesaVerifier: describe and indexState', () => {
+  test('describe returns all supported kinds with schemas', () => {
+    const verifier = new AnvesaVerifier(runner({}));
+    const desc = verifier.describe();
+    expect(desc.name).toBe('anvesa');
+    expect(desc.kinds.map((k) => k.kind)).toEqual([
+      'anvesa.wql',
+      'wql',
+      'anvesa.dependents',
+      'dependents',
+      'anvesa.callers',
+      'anvesa.callees',
+      'anvesa.routes',
+    ]);
+    expect(desc.kinds.every((k) => k.deterministic)).toBe(true);
+  });
+
+  test('indexState queries status', async () => {
+    const statusData = {
+      root: '/repo',
+      indexed: true,
+      index: { symbols: 120, calls: 450, files: 25 },
+    };
+    const verifier = new AnvesaVerifier(runner(statusData));
+    expect(await verifier.indexState()).toBe('120:450:25');
+
+    const failingVerifier = new AnvesaVerifier(async () => {
+      throw new YojanaError('TEST_FAIL', 'fail');
+    });
+    expect(await failingVerifier.indexState()).toBeUndefined();
+  });
+});
+
 describe('PathVerifier', () => {
   const root = mkdtempSync(join(tmpdir(), 'yojana-path-'));
   afterAll(() => rmSync(root, { recursive: true, force: true }));

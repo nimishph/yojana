@@ -11,13 +11,17 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type IntentHandler, loadTemplate, renderPart } from '@cntxt-labs/patra-core';
-import { templateDir } from '@cntxt-labs/patra-templates';
 import { type VerifierPort, type WorkLinkPort, YojanaError } from '@cntxt-labs/yojana-core';
 import { ingest } from '../ingest.ts';
-import { type ReviewIntent, type ReviewSession, reviewSession } from '../session.ts';
+import {
+  REVIEW_TEMPLATE,
+  type ReviewIntent,
+  type ReviewSession,
+  reviewSession,
+} from '../session.ts';
 import { loadPlanFiles, openWorkspace } from '../workspace.ts';
 
-const loaded = loadTemplate(templateDir('review-document'));
+const loaded = loadTemplate(join(import.meta.dir, '..', '..', '..', 'templates', 'plan-review'));
 if (!loaded.ok) throw new YojanaError('TEST_FIXTURE', JSON.stringify(loaded.problems));
 const template = loaded.template;
 
@@ -98,7 +102,7 @@ const intent = (
   payload: Record<string, string> = {},
   version?: string,
 ): ReviewIntent => ({
-  template: 'review-document',
+  template: REVIEW_TEMPLATE,
   document: 'plan/s',
   action,
   target: { part: 'section', key },
@@ -108,16 +112,16 @@ const intent = (
 });
 
 const section = async (id: string) =>
-  (await session.load('review-document', 'plan/s'))?.sections.find((s) => s.id === id);
+  (await session.load(REVIEW_TEMPLATE, 'plan/s'))?.sections.find((s) => s.id === id);
 
 describe('review session', () => {
   test("its handler is patra's IntentHandler, and what it loads is valid content", async () => {
     const handler: IntentHandler = session.handle;
     expect(handler).toBeFunction();
-    const content = await session.load('review-document', 'plan/s');
+    const content = await session.load(REVIEW_TEMPLATE, 'plan/s');
     expect(template.check(content)).toEqual([]);
     expect(content?.sections[0]).toMatchObject({ tags: ['close', 'attention', 'unapproved'] });
-    expect(await session.load('review-document', 'plan/none')).toBeUndefined();
+    expect(await session.load(REVIEW_TEMPLATE, 'plan/none')).toBeUndefined();
     expect(await session.load('other', 'plan/s')).toBeUndefined();
     expect(await session.plans()).toEqual([{ id: 'plan/s', status: 'accepted', requirements: 2 }]);
   });
@@ -154,14 +158,14 @@ describe('review session', () => {
         intent('comment', 'first', { body: 'Plain how?', quote: 'reads plainly' }),
       ),
     ).toEqual({ ok: true, update: { kind: 'page' } });
-    const thread = (await session.load('review-document', 'plan/s'))?.threads[0];
+    const thread = (await session.load(REVIEW_TEMPLATE, 'plan/s'))?.threads[0];
     expect(thread).toMatchObject({ section: 'first', mark: '1', author: 'me' });
     const reply = await session.handle({
       ...intent('reply', thread?.id ?? '', { body: 'Short words.' }),
       target: { part: 'thread', key: thread?.id ?? '' },
     });
     expect(reply.ok).toBe(true);
-    expect((await session.load('review-document', 'plan/s'))?.threads[0]?.replies).toHaveLength(1);
+    expect((await session.load(REVIEW_TEMPLATE, 'plan/s'))?.threads[0]?.replies).toHaveLength(1);
     expect(await session.handle(intent('reply', 'n_gone', { body: 'x' }))).toMatchObject({
       ok: false,
       code: 'NOT_FOUND',
@@ -173,7 +177,7 @@ describe('review session', () => {
   });
 
   test('remove takes off a reply (by item) or the thread itself; only for their author', async () => {
-    const thread = (await session.load('review-document', 'plan/s'))?.threads[0];
+    const thread = (await session.load(REVIEW_TEMPLATE, 'plan/s'))?.threads[0];
     const replyId = thread?.replies[0]?.id ?? '';
     const remove = (key: string, item = '', actor = 'me') =>
       session.handle({
@@ -183,13 +187,13 @@ describe('review session', () => {
       });
     expect(await remove(thread?.id ?? '', replyId, 'ana')).toMatchObject({ code: 'NOT_YOURS' });
     expect(await remove(thread?.id ?? '', replyId)).toEqual({ ok: true, update: { kind: 'page' } });
-    expect((await session.load('review-document', 'plan/s'))?.threads[0]?.replies).toEqual([]);
+    expect((await session.load(REVIEW_TEMPLATE, 'plan/s'))?.threads[0]?.replies).toEqual([]);
     expect((await remove(thread?.id ?? '')).ok).toBe(true);
-    expect((await session.load('review-document', 'plan/s'))?.threads).toEqual([]);
+    expect((await session.load(REVIEW_TEMPLATE, 'plan/s'))?.threads).toEqual([]);
   });
 
   test('decline-section declines a requirement with a reason, checked against the revision', async () => {
-    const section = (await session.load('review-document', 'plan/s'))?.sections[0];
+    const section = (await session.load(REVIEW_TEMPLATE, 'plan/s'))?.sections[0];
     expect(section?.buttons).toContainEqual({ action: 'decline-section', label: 'Decline' });
     expect(
       await session.handle(intent('decline-section', 'first', { reason: '' }, section?.version)),
@@ -202,7 +206,7 @@ describe('review session', () => {
         intent('decline-section', 'first', { reason: 'Say who reads it.' }, section?.version),
       ),
     ).toEqual({ ok: true, update: { kind: 'page' } });
-    const after = (await session.load('review-document', 'plan/s'))?.sections[0];
+    const after = (await session.load(REVIEW_TEMPLATE, 'plan/s'))?.sections[0];
     expect(after?.properties).toContainEqual({
       label: 'declined by me: Say who reads it.',
       intent: 'danger',
@@ -221,7 +225,7 @@ describe('review session', () => {
         ),
       ),
     ).toEqual({ ok: true, update: { kind: 'page' } });
-    const change = (await session.load('review-document', 'plan/s'))?.changes[0];
+    const change = (await session.load(REVIEW_TEMPLATE, 'plan/s'))?.changes[0];
     expect(change).toMatchObject({ applies: true, author: 'me' });
     const id = change?.id ?? '';
     expect(await session.handle(intent('reject', id, { reason: '' }))).toMatchObject({
@@ -238,7 +242,7 @@ describe('review session', () => {
     await session.handle(
       intent('suggest', 'first', { title: 'first', text: 'Reads clearly.' }, first?.version),
     );
-    const id = (await session.load('review-document', 'plan/s'))?.changes[0]?.id ?? '';
+    const id = (await session.load(REVIEW_TEMPLATE, 'plan/s'))?.changes[0]?.id ?? '';
     expect(await session.handle(intent('accept', id))).toEqual({
       ok: true,
       update: { kind: 'page' },
@@ -249,15 +253,15 @@ describe('review session', () => {
   });
 
   test('refresh asks the tracker again; unknown actions are refused', async () => {
-    await session.load('review-document', 'plan/s');
+    await session.load(REVIEW_TEMPLATE, 'plan/s');
     const before = bdCalls;
-    await session.load('review-document', 'plan/s');
+    await session.load(REVIEW_TEMPLATE, 'plan/s');
     expect(bdCalls).toBe(before);
     expect(await session.handle(intent('refresh', ''))).toEqual({
       ok: true,
       update: { kind: 'page' },
     });
-    await session.load('review-document', 'plan/s');
+    await session.load(REVIEW_TEMPLATE, 'plan/s');
     expect(bdCalls).toBeGreaterThan(before);
     expect(await session.handle(intent('launch', 'first'))).toMatchObject({ code: 'UNSUPPORTED' });
     expect(await session.handle({ ...intent('edit', 'first'), template: 'x' })).toMatchObject({
@@ -277,7 +281,7 @@ describe('review session', () => {
       ),
     ).toEqual({ ok: true, update: { kind: 'page' } });
     expect(closed.has('b-1')).toBe(true);
-    const content = await session.load('review-document', 'plan/s');
+    const content = await session.load(REVIEW_TEMPLATE, 'plan/s');
     const first = content?.sections.find((s) => s.id === 'first');
     expect(first?.properties[0]).toEqual({ label: 'b-1 · closed', intent: 'success' });
     expect(first?.flags).toBeUndefined();

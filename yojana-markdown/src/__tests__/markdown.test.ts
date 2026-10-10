@@ -253,3 +253,283 @@ describe('renderPlan: claim defaults', () => {
     expect(rendered.match(/expect: false/g)).toHaveLength(1);
   });
 });
+
+describe('parsePlan and renderPlan: actions under requirements', () => {
+  const planWithActions = plan(
+    [
+      '## Requirement: Server {#req-server beads=yoj-1}',
+      'Requirement prose goes here.',
+      '```yojana:claim',
+      'kind: path',
+      'expression: src/server.ts',
+      '```',
+      '',
+      '### Actions',
+      '',
+      '- Add an npx launcher to .mcp.json {#act-npx bead=anv-yp2.3}',
+      '```yojana:claim',
+      'kind: path',
+      'expression: .mcp.json',
+      '```',
+      '- Implement graceful shutdown {#act-shutdown beads=anv-1,anv-2}',
+      '- Write unit tests {#act-tests}',
+    ].join('\n'),
+  );
+
+  test('parses actions with bead links, claims, and stable ids', () => {
+    const parsed = ok(parsePlan('p.md', planWithActions));
+    expect(parsed.requirements).toHaveLength(1);
+    const req = parsed.requirements[0];
+    expect(req).toBeDefined();
+    if (!req) return;
+    expect(req.id).toBe('req-server');
+    expect(req.text).toBe('Requirement prose goes here.');
+    expect(req.claims).toEqual([{ kind: 'path', expression: 'src/server.ts', expect: true }]);
+    expect(req.workItems).toEqual(['yoj-1']);
+    expect(req.actions).toEqual([
+      {
+        id: 'act-npx',
+        text: 'Add an npx launcher to .mcp.json',
+        workItems: ['anv-yp2.3'],
+        claims: [{ kind: 'path', expression: '.mcp.json', expect: true }],
+      },
+      {
+        id: 'act-shutdown',
+        text: 'Implement graceful shutdown',
+        workItems: ['anv-1', 'anv-2'],
+      },
+      {
+        id: 'act-tests',
+        text: 'Write unit tests',
+      },
+    ]);
+    expect(req.actionsRevision).toBeDefined();
+    expect(req.revision).toBeDefined();
+  });
+
+  test('actions get their own revision: editing actions does not change requirement revision', () => {
+    const parsed1 = ok(parsePlan('p.md', planWithActions));
+    const req1 = parsed1.requirements[0];
+    expect(req1).toBeDefined();
+
+    const planWithEditedActions = plan(
+      [
+        '## Requirement: Server {#req-server beads=yoj-1}',
+        'Requirement prose goes here.',
+        '```yojana:claim',
+        'kind: path',
+        'expression: src/server.ts',
+        '```',
+        '',
+        '### Actions',
+        '',
+        '- Add an npx launcher to .mcp.json {#act-npx bead=anv-yp2.3}',
+        '- Implement graceful shutdown and reload {#act-shutdown beads=anv-1}',
+      ].join('\n'),
+    );
+    const parsed2 = ok(parsePlan('p.md', planWithEditedActions));
+    const req2 = parsed2.requirements[0];
+    expect(req2).toBeDefined();
+
+    if (!req1 || !req2) return;
+    expect(req1.revision).toBe(req2.revision);
+    expect(req1.actionsRevision).not.toBe(req2.actionsRevision);
+  });
+
+  test('action validation issues: missing id, invalid id, duplicate id, bad attributes, misplaced claims', () => {
+    const planBad = plan(
+      [
+        '## Requirement: Server {#req-server}',
+        '### Actions',
+        '```yojana:claim',
+        'kind: path',
+        'expression: early.ts',
+        '```',
+        '- No id here',
+        '- Invalid id {#not-starting-with-act}',
+        '- Duplicate 1 {#act-dup}',
+        '- Duplicate 2 {#act-dup}',
+        '- Bad attr {#act-bad wrong=123}',
+      ].join('\n'),
+    );
+    expect(codes(parsePlan('p.md', planBad))).toEqual([
+      'CLAIM_WITHOUT_ACTION@7',
+      'MISSING_ACTION_ID@11',
+      'INVALID_ACTION_ID@12',
+      'DUPLICATE_ACTION_ID@14',
+      'INVALID_ACTION_ATTRIBUTE@15',
+    ]);
+  });
+
+  test('round-trips through renderPlan', () => {
+    const parsed = ok(parsePlan('p.md', planWithActions));
+    const rendered = renderPlan(parsed);
+    expect(rendered).toContain('### Actions');
+    expect(rendered).toContain('- Add an npx launcher to .mcp.json {#act-npx bead=anv-yp2.3}');
+    expect(rendered).toContain('- Implement graceful shutdown {#act-shutdown beads=anv-1,anv-2}');
+    expect(rendered).toContain('- Write unit tests {#act-tests}');
+    const roundTripped = ok(parsePlan('p.md', rendered));
+    expect(roundTripped.requirements).toEqual(parsed.requirements);
+  });
+});
+
+describe('structured claims', () => {
+  const structuredPlan = plan(
+    [
+      '## Requirement: Callers {#req-callers}',
+      '```yojana:claim',
+      'kind: anvesa.callers',
+      'symbol: handleRequest',
+      'expect:',
+      '  gte: 2',
+      '```',
+    ].join('\n'),
+  );
+
+  test('parses structured claims with params and predicate expectations', () => {
+    const parsed = ok(parsePlan('p.md', structuredPlan));
+    expect(parsed.requirements[0]?.claims).toEqual([
+      {
+        kind: 'anvesa.callers',
+        params: { symbol: 'handleRequest' },
+        expect: { gte: 2 },
+      },
+    ]);
+  });
+
+  test('round-trips structured claims through renderPlan', () => {
+    const parsed = ok(parsePlan('p.md', structuredPlan));
+    const rendered = renderPlan(parsed);
+    expect(rendered).toContain('kind: anvesa.callers');
+    expect(rendered).toContain('symbol: handleRequest');
+    expect(rendered).toContain('expect:');
+    expect(rendered).toContain('  gte: 2');
+    const roundTripped = ok(parsePlan('p.md', rendered));
+    expect(roundTripped.requirements).toEqual(parsed.requirements);
+  });
+});
+
+describe('composite claims (all, any, not)', () => {
+  const compositePlan = plan(
+    [
+      '## Requirement: composed {#comp}',
+      '```yojana:claim',
+      'kind: all',
+      'claims:',
+      '  - kind: path',
+      '    expression: src/core.ts',
+      '  - kind: not',
+      '    claim:',
+      '      kind: path',
+      '      expression: src/legacy.ts',
+      '```',
+      '```yojana:claim',
+      'kind: any',
+      'claims:',
+      '  - kind: path',
+      '    expression: src/impl_a.ts',
+      '  - kind: path',
+      '    expression: src/impl_b.ts',
+      '```',
+    ].join('\n'),
+  );
+
+  test('parses composite claims with all, any, and not', () => {
+    const parsed = ok(parsePlan('p.md', compositePlan));
+    expect(parsed.requirements[0]?.claims).toEqual([
+      {
+        kind: 'all',
+        claims: [
+          { kind: 'path', expression: 'src/core.ts', expect: true },
+          {
+            kind: 'not',
+            claims: [{ kind: 'path', expression: 'src/legacy.ts', expect: true }],
+            expect: true,
+          },
+        ],
+        expect: true,
+      },
+      {
+        kind: 'any',
+        claims: [
+          { kind: 'path', expression: 'src/impl_a.ts', expect: true },
+          { kind: 'path', expression: 'src/impl_b.ts', expect: true },
+        ],
+        expect: true,
+      },
+    ]);
+  });
+
+  test('parses shorthand top-level keys all, any, and not', () => {
+    const shorthandPlan = plan(
+      [
+        '## Requirement: shorthand {#sh}',
+        '```yojana:claim',
+        'all:',
+        '  - kind: path',
+        '    expression: src/a.ts',
+        '  - kind: path',
+        '    expression: src/b.ts',
+        '```',
+        '```yojana:claim',
+        'not:',
+        '  kind: path',
+        '  expression: src/old.ts',
+        '```',
+      ].join('\n'),
+    );
+    const parsed = ok(parsePlan('p.md', shorthandPlan));
+    expect(parsed.requirements[0]?.claims).toEqual([
+      {
+        kind: 'all',
+        claims: [
+          { kind: 'path', expression: 'src/a.ts', expect: true },
+          { kind: 'path', expression: 'src/b.ts', expect: true },
+        ],
+        expect: true,
+      },
+      {
+        kind: 'not',
+        claims: [{ kind: 'path', expression: 'src/old.ts', expect: true }],
+        expect: true,
+      },
+    ]);
+  });
+
+  test('round-trips composite claims through renderPlan', () => {
+    const parsed = ok(parsePlan('p.md', compositePlan));
+    const rendered = renderPlan(parsed);
+    expect(rendered).toContain('kind: all');
+    expect(rendered).toContain('kind: not');
+    expect(rendered).toContain('kind: any');
+    const roundTripped = ok(parsePlan('p.md', rendered));
+    expect(roundTripped.requirements).toEqual(parsed.requirements);
+  });
+
+  test('validation issues on invalid composite claims', () => {
+    const emptyAll = plan('## Requirement: r {#r}\n```yojana:claim\nkind: all\nclaims: []\n```\n');
+    const r1 = parsePlan('p.md', emptyAll);
+    expect(r1.ok).toBe(false);
+    if (!r1.ok) {
+      expect(r1.issues[0]?.code).toBe('INVALID_CLAIM');
+      expect(r1.issues[0]?.message).toContain('at least one child claim');
+    }
+
+    const notWithMultiple = plan(
+      '## Requirement: r {#r}\n```yojana:claim\nkind: not\nclaims:\n  - kind: path\n    expression: a\n  - kind: path\n    expression: b\n```\n',
+    );
+    const r2 = parsePlan('p.md', notWithMultiple);
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) {
+      expect(r2.issues[0]?.code).toBe('INVALID_CLAIM');
+      expect(r2.issues[0]?.message).toContain('single child claim');
+    }
+
+    const notMissingChild = plan('## Requirement: r {#r}\n```yojana:claim\nkind: not\n```\n');
+    const r3 = parsePlan('p.md', notMissingChild);
+    expect(r3.ok).toBe(false);
+    if (!r3.ok) {
+      expect(r3.issues[0]?.code).toBe('INVALID_CLAIM');
+    }
+  });
+});

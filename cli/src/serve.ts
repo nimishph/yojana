@@ -1,6 +1,7 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { type LoadedTemplate, loadTemplate } from '@cntxt-labs/patra-core';
 import { type PatraServer, serve } from '@cntxt-labs/patra-serve';
-import { templateDir } from '@cntxt-labs/patra-templates';
 import { themeFile } from '@cntxt-labs/patra-themes';
 import { REVIEW_TEMPLATE, reviewSession } from '@cntxt-labs/yojana';
 import { type VerifierPort, type WorkLinkPort, YojanaError } from '@cntxt-labs/yojana-core';
@@ -8,8 +9,8 @@ import { loadConfig, themeStylesheet } from './config.ts';
 
 /**
  * `yojana review --serve`: plans, live, on this machine only. yojana keeps the domain and patra
- * draws the page and takes people's actions (ADR-001): the review session projects a plan into
- * patra's review-document template and turns each intent into the engine command the CLI runs.
+ * draws the page and takes people's actions (ADR-001, ADR-002): the review session projects a plan into
+ * yojana's plan-review template and turns each intent into the engine command the CLI runs.
  * patra's server checks the token and Host, and runs one write at a time.
  */
 
@@ -33,13 +34,20 @@ export interface ReviewServer {
   stop(): void;
 }
 
-/** patra's review-document template; a template that does not load is a broken install. */
+/** The directory of yojana's template, from the plugin bundle or a checkout. */
+function templateDir(name: string): string {
+  const bundled = join(import.meta.dir, name);
+  if (existsSync(bundled)) return bundled;
+  return join(import.meta.dir, '..', '..', 'templates', name);
+}
+
+/** yojana's plan-review template; a template that does not load is a broken install. */
 export function reviewTemplate(): LoadedTemplate {
   const loaded = loadTemplate(templateDir(REVIEW_TEMPLATE));
   if (!loaded.ok) {
     throw new YojanaError(
       'TEMPLATE_INVALID',
-      `patra's ${REVIEW_TEMPLATE} template did not load: ${loaded.problems.map((p) => `${p.file} ${p.message}`).join('; ')}`,
+      `yojana's ${REVIEW_TEMPLATE} template did not load: ${loaded.problems.map((p) => `${p.file} ${p.message}`).join('; ')}`,
     );
   }
   return loaded.template;

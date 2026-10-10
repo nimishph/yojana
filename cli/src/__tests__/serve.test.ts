@@ -54,7 +54,7 @@ afterAll(() => {
 });
 
 const post = (action: string, fields: Record<string, string>, token = server.token) =>
-  fetch(`${server.url}/i/review-document/${DOC}/${action}`, {
+  fetch(`${server.url}/i/plan-review/${DOC}/${action}`, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-patra-token': token },
     body: new URLSearchParams(fields),
@@ -62,13 +62,13 @@ const post = (action: string, fields: Record<string, string>, token = server.tok
 
 /** The revision a section shows, read from the page as a person's browser would see it. */
 async function versionOf(id: string): Promise<string> {
-  const page = await (await fetch(`${server.url}/d/review-document/${DOC}`)).text();
+  const page = await (await fetch(`${server.url}/d/plan-review/${DOC}`)).text();
   const match = new RegExp(`data-patra-key="${id}"[^>]*data-patra-version="([^"]+)"`).exec(page);
   return match?.[1] ?? '';
 }
 
 describe('review --serve on patra', () => {
-  test('lists plans with their pages, and serves a plan through the review-document template', async () => {
+  test('lists plans with their pages, and serves a plan through the plan-review template', async () => {
     const [plan] = await server.plans();
     expect(plan).toMatchObject({ id: 'plan/live', status: 'accepted', requirements: 2 });
     const response = await fetch(plan?.url ?? '');
@@ -77,7 +77,7 @@ describe('review --serve on patra', () => {
     expect(page).toContain('<script src="/assets/htmx.js"></script>');
     expect(page).toContain('data-patra-part="section" data-patra-key="alpha"');
     expect(page).toContain('Alpha as <code>planned</code>.');
-    expect((await fetch(`${server.url}/d/review-document/plan%2Fnone`)).status).toBe(404);
+    expect((await fetch(`${server.url}/d/plan-review/plan%2Fnone`)).status).toBe(404);
   });
 
   test('an edit writes the plan file and swaps the section; a stale one comes back with why', async () => {
@@ -122,26 +122,24 @@ describe('review --serve on patra', () => {
 
     const commented = await post('comment', { _key: 'alpha', body: 'Good.', quote: 'revised' });
     expect(commented.headers.get('HX-Refresh')).toBe('true');
-    const page = await (await fetch(`${server.url}/d/review-document/${DOC}`)).text();
+    const page = await (await fetch(`${server.url}/d/plan-review/${DOC}`)).text();
     expect(page).toContain('<mark data-mark="1">revised</mark>');
     expect(page).toContain('page-user');
   });
 
   test('your comment offers Remove, through its form; a section offers Decline', async () => {
-    const page = await (await fetch(`${server.url}/d/review-document/${DOC}`)).text();
+    const page = await (await fetch(`${server.url}/d/plan-review/${DOC}`)).text();
     const thread = /data-patra-part="thread" data-patra-key="([^"]+)"/.exec(page)?.[1] ?? '';
     expect(page).toContain('<button type="button" class="link" data-patra-action="remove">');
     expect(page).toContain('data-patra-action="decline-section"');
 
     const form = await fetch(
-      `${server.url}/f/review-document/${DOC}/remove?key=${encodeURIComponent(thread)}`,
+      `${server.url}/f/plan-review/${DOC}/remove?key=${encodeURIComponent(thread)}`,
     );
     expect(await form.text()).toContain('Remove this comment?');
     const removed = await post('remove', { _key: thread, item: '' });
     expect(removed.headers.get('HX-Refresh')).toBe('true');
-    expect(await (await fetch(`${server.url}/d/review-document/${DOC}`)).text()).not.toContain(
-      'Good.',
-    );
+    expect(await (await fetch(`${server.url}/d/plan-review/${DOC}`)).text()).not.toContain('Good.');
 
     const declined = await post('decline-section', {
       _key: 'beta',
@@ -149,7 +147,7 @@ describe('review --serve on patra', () => {
       reason: 'Name the release.',
     });
     expect(declined.headers.get('HX-Refresh')).toBe('true');
-    expect(await (await fetch(`${server.url}/d/review-document/${DOC}`)).text()).toContain(
+    expect(await (await fetch(`${server.url}/d/plan-review/${DOC}`)).text()).toContain(
       'declined by page-user: Name the release.',
     );
   });

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import { loadTemplate } from '@cntxt-labs/patra-core';
-import { templateDir } from '@cntxt-labs/patra-templates';
 import {
   foldLog,
   type VerifierPort,
@@ -18,7 +18,7 @@ import { projectReview } from '../project.ts';
 import { status } from '../status.ts';
 
 const parser = new MarkdownParser();
-const loaded = loadTemplate(templateDir('review-document'));
+const loaded = loadTemplate(join(import.meta.dir, '..', '..', '..', 'templates', 'plan-review'));
 if (!loaded.ok) throw new YojanaError('TEST_FIXTURE', JSON.stringify(loaded.problems));
 const template = loaded.template;
 
@@ -172,7 +172,7 @@ async function setup() {
 }
 
 describe('projector', () => {
-  test("the projection is valid content for patra's review-document template", async () => {
+  test("the projection is valid content for yojana's plan-review template", async () => {
     const content = (await setup()).project();
     expect(content).toBeDefined();
     expect(template.check(content)).toEqual([]);
@@ -298,5 +298,100 @@ describe('projector', () => {
     const raw = /annotation-added|revision-recorded|change-opened|work-linked|status-changed/;
     expect(activity.some((a) => raw.test(a.what))).toBe(false);
     expect(activity.map((a) => a.what)).toContain('moved the plan to in-progress');
+  });
+
+  test('review projection carries actions with derived state and flags close?/reopen? per action', async () => {
+    const PLAN_WITH_ACTIONS = `---
+id: plan/act-review
+status: in-progress
+---
+
+# Actions review test
+
+## Requirement: delivery {#req-delivery}
+
+### Actions
+- An action that holds but open {#act-open bead=b-open}
+\`\`\`yojana:claim
+kind: fake
+expression: present
+\`\`\`
+- An action that is closed but broken {#act-closed bead=b-closed}
+\`\`\`yojana:claim
+kind: fake
+expression: absent
+\`\`\`
+`;
+    const store = new MemoryStore();
+    await store.open();
+    const bases = new MemoryBaseStore();
+    const files = [{ source: 'plans/act-review.md', text: PLAN_WITH_ACTIONS }];
+    await ingest({ store, parser, bases, files, actor: 'me' });
+    const checks = await check({ store, verifiers: [fake], planId: 'plan/act-review' });
+    const events = await store.events();
+    const now = (events.at(-1)?.at ?? 0) + 1000;
+    const report = await status({
+      store,
+      parser,
+      bases,
+      files,
+      worklink: tracker,
+      checks,
+      now,
+      staleDays: 14,
+      planId: 'plan/act-review',
+    });
+    const parsed = parser.parse('plans/act-review.md', PLAN_WITH_ACTIONS);
+    if (!parsed.ok) throw new YojanaError('TEST_FIXTURE', 'parse error');
+    const content = projectReview({
+      events,
+      planId: 'plan/act-review',
+      plan: parsed.plan,
+      report: report.plans[0],
+      checks: checks.plans[0]?.results ?? [],
+      checkedAt: now,
+      now,
+      mode: 'read',
+    });
+    expect(content).toBeDefined();
+    // Must be valid against the plan-review template schema!
+    expect(template.check(content)).toEqual([]);
+
+    const sec = content?.sections[0];
+    expect(sec?.id).toBe('req-delivery');
+    expect(sec?.tags).toContain('close');
+    expect(sec?.note).toContain('close?');
+    expect(sec?.note).toContain('reopen?');
+
+    // Section flags contain buttons for action-level close and reopen
+    expect(sec?.flags).toEqual([
+      {
+        text: 'Action act-open: its claim holds, but b-open is still open.',
+        intent: 'primary',
+        buttons: [
+          {
+            action: 'decide',
+            label: 'Close b-open',
+            item: 'b-open',
+            decision: 'close',
+            primary: true,
+          },
+        ],
+      },
+      {
+        text: 'Action act-closed: the work is closed but 1 claim violated: closed too early, or regressed.',
+        intent: 'danger',
+        buttons: [
+          { action: 'decide', label: 'Reopen b-closed', item: 'b-closed', decision: 'reopen' },
+        ],
+      },
+    ]);
+
+    // Section carries actions with derived done state
+    expect(sec?.actions).toBeDefined();
+    expect(sec?.actions?.map((a) => ({ id: a.id, done: a.done, note: a.note }))).toEqual([
+      { id: 'act-open', done: false, note: 'close?' },
+      { id: 'act-closed', done: false, note: 'reopen?' },
+    ]);
   });
 });

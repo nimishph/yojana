@@ -22,6 +22,8 @@ export {
   foldLog,
   isAnnotationOutdated,
   isAnnotationRemoved,
+  normalizeClaim,
+  normalizeRequirement,
   openAnomalies,
   type PlanState,
   type ProposalStatus,
@@ -31,10 +33,12 @@ export {
   waitingProposals,
 } from './fold.ts';
 export {
+  type Action,
   type Annotation,
   type Change,
   type ChangeDraft,
   type Claim,
+  type ClaimPredicate,
   type Delta,
   type DeltaDraft,
   PLAN_STATUSES,
@@ -42,6 +46,8 @@ export {
   type PlanPart,
   type PlanStatus,
   type Requirement,
+  requirementWorkItems,
+  type ScalarPredicate,
 } from './model.ts';
 export type {
   ChangeParseResult,
@@ -50,19 +56,51 @@ export type {
   ParserPort,
 } from './parser-port.ts';
 export {
+  COMPOSITE_CLAIM_KINDS,
+  type CompositeClaimKind,
+  describeClaim,
+  evaluatePredicate,
+  formatExpectation,
+  isCompositeClaimKind,
+} from './predicate.ts';
+export {
+  type ActionId,
+  actionsRevision,
+  assertActionId,
   assertChangeId,
   assertRequirementId,
+  canonicalClaim,
   normalizeContent,
   type RequirementId,
   type RevisionHash,
   requirementRevision,
   revisionHash,
 } from './revision.ts';
+export type {
+  RuleProposal,
+  RuleProposalResult,
+  RuleSinkPort,
+} from './rule-sink-port.ts';
 export type { OpenResult, StorePort } from './store-port.ts';
 export type { PullResult, PushResult, SyncPort, SyncState, SyncStatus } from './sync-port.ts';
-export type { ClaimOutcome, ClaimResult, VerifierPort } from './verifier-port.ts';
+export {
+  type ClaimCachePort,
+  type ClaimKindDescriptor,
+  type ClaimOutcome,
+  type ClaimResult,
+  type ClaimValidationError,
+  computeClaimCacheKey,
+  evaluateClaimOutcome,
+  getClaimKindDescriptor,
+  type ParamSchema,
+  type ParamType,
+  type VerifierDescriptor,
+  type VerifierPort,
+  validateClaimSchema,
+} from './verifier-port.ts';
 export type {
   WorkChange,
+  WorkCreateResult,
   WorkItem,
   WorkItemState,
   WorkLinkPort,

@@ -3,7 +3,9 @@ import {
   approvalOf,
   type ChangeState,
   type ClaimResult,
+  canonicalClaim,
   type Delta,
+  describeClaim,
   findBaseConflicts,
   foldLog,
   isAnnotationOutdated,
@@ -23,8 +25,8 @@ import { quotePosition } from './comment.ts';
 import type { PlanReport } from './status.ts';
 
 /**
- * The projector: yojana's state for one plan, as content for patra's `review-document` template.
- * yojana keeps the domain; how it looks and how people act on it are patra's (ADR-001). The output
+ * The projector: yojana's state for one plan, as content for yojana's `plan-review` template.
+ * yojana keeps the domain; how it looks and how people act on it are patra's (ADR-001, ADR-002). The output
  * is plain data shaped by the template's content schema; nothing here knows about HTML.
  *
  * What a person needs to see first is computed here, not in the template: each requirement's
@@ -57,6 +59,15 @@ interface Button {
   readonly primary?: boolean;
 }
 
+export interface ReviewAction {
+  readonly id: string;
+  readonly text: string;
+  readonly done: boolean;
+  readonly items?: readonly Chip[] | undefined;
+  readonly claims?: readonly Chip[] | undefined;
+  readonly note?: string | undefined;
+}
+
 export interface ReviewSection {
   readonly id: string;
   readonly title: string;
@@ -71,6 +82,7 @@ export interface ReviewSection {
   readonly flags?: readonly { text: string; intent?: Intent; buttons?: readonly Button[] }[];
   readonly buttons?: readonly Button[];
   readonly editable: { readonly title: string; readonly text: string };
+  readonly actions?: readonly ReviewAction[] | undefined;
 }
 
 /** A decision on the whole plan (its status), with what to weigh before making it. */
@@ -120,7 +132,7 @@ export interface ReviewActivity {
   readonly when: string;
 }
 
-/** Content for patra's `review-document` template (see its content.schema.json). */
+/** Content for yojana's `plan-review` template (see its content.schema.json). */
 export interface ReviewDocument {
   readonly document: {
     readonly id: string;
@@ -446,8 +458,8 @@ function projectSection(input: {
   readonly marks: ReadonlyMap<string, string>;
 }): ReviewSection {
   const { plan, requirement: r, marks } = input;
-  const results = input.checks.filter((c) => c.requirement === r.id);
-  const health = healthOf(results);
+  const reqResults = input.checks.filter((c) => c.requirement === r.id && c.action === undefined);
+  const health = healthOf(reqResults);
   const alignment = input.report?.alignment.find((a) => a.requirement === r.id);
   const touching = input.openChanges.filter((c) =>
     c.change.deltas.some((d) => deltaTarget(d) === r.id),
@@ -461,8 +473,13 @@ function projectSection(input: {
   const approval = approvalOf(plan, r.id);
   const approved = approval?.verdict === 'approved' && !approval.stale;
   const declined = approval?.verdict === 'declined' && !approval.stale;
+  const hasActionClose = alignment?.actions?.some((a) => a.mismatch === 'claims-hold-work-open');
+  const hasActionReopen = alignment?.actions?.some(
+    (a) => a.mismatch === 'work-closed-claims-violated',
+  );
+
   const tags: string[] = [];
-  if (alignment?.mismatch === 'claims-hold-work-open') tags.push('close');
+  if (alignment?.mismatch === 'claims-hold-work-open' || hasActionClose) tags.push('close');
   if (health === 'danger') tags.push('violated');
   if (declined) tags.push('declined');
   if (tags.length > 0 || touching.length > 0 || contested) tags.push('attention');
@@ -470,8 +487,8 @@ function projectSection(input: {
   if (!approved) tags.push('unapproved');
 
   const note = [
-    alignment?.mismatch === 'claims-hold-work-open' ? 'close?' : '',
-    alignment?.mismatch === 'work-closed-claims-violated' ? 'reopen?' : '',
+    alignment?.mismatch === 'claims-hold-work-open' || hasActionClose ? 'close?' : '',
+    alignment?.mismatch === 'work-closed-claims-violated' || hasActionReopen ? 'reopen?' : '',
     contested ? 'contested' : '',
     declined ? 'declined' : '',
     touching.length > 0 ? plural(touching.length, 'change') : '',
@@ -488,11 +505,11 @@ function projectSection(input: {
     })),
     ...(r.claims.length === 0
       ? []
-      : results.length === 0
+      : reqResults.length === 0
         ? [{ label: plural(r.claims.length, 'claim') }]
         : [
             {
-              label: `${results.filter((x) => x.outcome === 'holds').length}/${results.length} claims hold`,
+              label: `${reqResults.filter((x) => x.outcome === 'holds').length}/${reqResults.length} claims hold`,
               intent: health,
             },
           ]),
@@ -565,6 +582,39 @@ function projectSection(input: {
       });
     }
   }
+  for (const act of alignment?.actions ?? []) {
+    if (act.mismatch === 'claims-hold-work-open') {
+      const open = act.items.filter((i) => i.state !== 'closed' && !decided(i.id));
+      if (open.length > 0) {
+        flags.push({
+          text: `Action ${act.action}: ${act.holds === 1 ? 'its claim holds' : `all ${act.holds} claims hold`}, but ${open.map((i) => i.id).join(', ')} ${open.length === 1 ? 'is' : 'are'} still open.`,
+          intent: 'primary',
+          buttons: open.map((i) => ({
+            action: 'decide',
+            label: `Close ${i.id}`,
+            item: i.id,
+            decision: 'close',
+            primary: true,
+          })),
+        });
+      }
+    }
+    if (act.mismatch === 'work-closed-claims-violated') {
+      const closed = act.items.filter((i) => !decided(i.id));
+      if (closed.length > 0) {
+        flags.push({
+          text: `Action ${act.action}: the work is closed but ${plural(act.violated, 'claim')} violated: closed too early, or regressed.`,
+          intent: 'danger',
+          buttons: closed.map((i) => ({
+            action: 'decide',
+            label: `Reopen ${i.id}`,
+            item: i.id,
+            decision: 'reopen',
+          })),
+        });
+      }
+    }
+  }
   if (contested) {
     flags.push({
       text: 'Edited on two branches at once. Edit it to settle which text stands.',
@@ -573,12 +623,50 @@ function projectSection(input: {
   }
 
   const quoted = plan.annotations.filter((a) => a.requirement === r.id && marks.has(a.id));
-  const evidence: Chip[] = r.claims.map((claim, i) => {
-    const result = results[i];
-    const expression = `${claim.kind} ${claim.expression}${claim.expect ? '' : ' (expect none)'}`;
+  const evidence: Chip[] = r.claims.map((claim) => {
+    const result = reqResults.find(
+      (cr) => cr.claim === claim || canonicalClaim(cr.claim) === canonicalClaim(claim),
+    );
+    const expression = describeClaim(claim);
     return result === undefined
       ? { label: `${expression} · not checked` }
       : { label: `${expression} · ${result.evidence}`, intent: OUTCOME_INTENT[result.outcome] };
+  });
+
+  const actions: ReviewAction[] | undefined = r.actions?.map((act) => {
+    const actAlign = alignment?.actions?.find((a) => a.action === act.id);
+    const actResults = input.checks.filter((c) => c.requirement === r.id && c.action === act.id);
+    const actItems = (act.workItems ?? []).map((id) => {
+      const item = actAlign?.items.find((i) => i.id === id);
+      const state = item?.state;
+      return {
+        label: state === undefined ? id : `${id} · ${state}`,
+        ...(state === 'closed' ? { intent: 'success' as const } : {}),
+      };
+    });
+    const actClaims = (act.claims ?? []).map((claim) => {
+      const result = actResults.find(
+        (cr) => cr.claim === claim || canonicalClaim(cr.claim) === canonicalClaim(claim),
+      );
+      const expression = describeClaim(claim);
+      return result === undefined
+        ? { label: `${expression} · not checked` }
+        : { label: `${expression} · ${result.evidence}`, intent: OUTCOME_INTENT[result.outcome] };
+    });
+    const actNote =
+      actAlign?.mismatch === 'claims-hold-work-open'
+        ? 'close?'
+        : actAlign?.mismatch === 'work-closed-claims-violated'
+          ? 'reopen?'
+          : undefined;
+    return {
+      id: act.id,
+      text: act.text,
+      done: actAlign?.done ?? false,
+      ...(actItems.length > 0 ? { items: actItems } : {}),
+      ...(actClaims.length > 0 ? { claims: actClaims } : {}),
+      ...(actNote !== undefined ? { note: actNote } : {}),
+    };
   });
 
   return {
@@ -619,6 +707,7 @@ function projectSection(input: {
           ],
         }),
     editable: { title: r.title, text: r.text },
+    ...(actions !== undefined ? { actions } : {}),
   };
 }
 

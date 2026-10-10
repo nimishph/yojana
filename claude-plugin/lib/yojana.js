@@ -1,6 +1,6 @@
 // @bun
 // cli/src/main.ts
-import { existsSync as existsSync8, mkdirSync as mkdirSync5, readFileSync as readFileSync7, writeFileSync as writeFileSync3 } from "fs";
+import { existsSync as existsSync9, mkdirSync as mkdirSync5, readFileSync as readFileSync7, writeFileSync as writeFileSync3 } from "fs";
 import { homedir as homedir2, userInfo } from "os";
 import { join as join9, relative as relative3, resolve as resolve2, sep as sep3 } from "path";
 // node_modules/.bun/@cntxt-labs+patra-core@.+vendor+patra+cntxt-labs-patra-core-0.0.0.tgz/node_modules/@cntxt-labs/patra-core/src/errors.ts
@@ -2227,6 +2227,42 @@ function computeEventId(event, at, actor, writtenAt) {
   return `e_${digest.slice(0, EVENT_ID_HEX_CHARS)}`;
 }
 // yojana-core/src/fold.ts
+function normalizeClaim(raw) {
+  if (typeof raw !== "object" || raw === null) {
+    return { kind: "unknown", expect: true };
+  }
+  const r = raw;
+  if (typeof r.kind === "string" && r.expect !== undefined) {
+    return raw;
+  }
+  const kind = typeof r.kind === "string" ? r.kind : "unknown";
+  const expression = typeof r.expression === "string" ? r.expression : undefined;
+  const expect = r.expect ?? true;
+  const params = typeof r.params === "object" && r.params !== null && !Array.isArray(r.params) ? r.params : undefined;
+  return {
+    kind,
+    ...expression !== undefined ? { expression } : {},
+    ...params !== undefined ? { params } : {},
+    expect: expect ?? true
+  };
+}
+function normalizeRequirement(requirement) {
+  const needsClaimNorm = requirement.claims.some((c) => c.expect === undefined);
+  const needsActNorm = requirement.actions?.some((a) => a.claims?.some((c) => c.expect === undefined));
+  if (!needsClaimNorm && !needsActNorm) {
+    return requirement;
+  }
+  const claims = (requirement.claims ?? []).map(normalizeClaim);
+  const actions = requirement.actions?.map((a) => ({
+    ...a,
+    claims: a.claims?.map(normalizeClaim)
+  }));
+  return {
+    ...requirement,
+    claims,
+    ...actions !== undefined ? { actions } : {}
+  };
+}
 function openAnomalies(state) {
   return state.anomalies.filter((a) => a.settledBy === undefined);
 }
@@ -2285,7 +2321,7 @@ function applyDelta(state, plan, delta, seq) {
   if (delta.op === "remove")
     plan.heads.delete(id);
   else
-    plan.heads.set(id, delta.requirement);
+    plan.heads.set(id, normalizeRequirement(delta.requirement));
 }
 function applyEvent(state, event) {
   const { seq } = event;
@@ -2535,6 +2571,11 @@ function isAnnotationOutdated(state, planId, a) {
   return state.plans.get(planId)?.heads.get(a.requirement)?.revision !== a.revision;
 }
 // yojana-core/src/model.ts
+function requirementWorkItems(requirement) {
+  const reqWork = requirement.workItems ?? [];
+  const actWork = (requirement.actions ?? []).flatMap((a) => a.workItems ?? []);
+  return [...new Set([...reqWork, ...actWork])];
+}
 var PLAN_STATUSES = [
   "draft",
   "accepted",
@@ -2543,6 +2584,134 @@ var PLAN_STATUSES = [
   "superseded",
   "abandoned"
 ];
+// yojana-core/src/predicate.ts
+function isCompositeClaimKind(kind) {
+  return kind === "all" || kind === "any" || kind === "not";
+}
+function evaluatePredicate(predicate, measurement) {
+  if (typeof predicate === "boolean") {
+    if (typeof measurement === "boolean") {
+      return measurement === predicate;
+    }
+    if (typeof measurement === "number") {
+      return predicate ? measurement > 0 : measurement === 0;
+    }
+    if (Array.isArray(measurement)) {
+      return predicate ? measurement.length > 0 : measurement.length === 0;
+    }
+    if (measurement !== null && typeof measurement === "object") {
+      const record = measurement;
+      if ("count" in record && typeof record.count === "number") {
+        return predicate ? record.count > 0 : record.count === 0;
+      }
+      if ("found" in record && typeof record.found === "boolean") {
+        return record.found === predicate;
+      }
+      if ("matches" in record && Array.isArray(record.matches)) {
+        return predicate ? record.matches.length > 0 : record.matches.length === 0;
+      }
+      return predicate;
+    }
+    return Boolean(measurement) === predicate;
+  }
+  if (predicate !== null && typeof predicate === "object") {
+    const predObj = predicate;
+    const isScalarOp = "eq" in predObj || "gte" in predObj || "lte" in predObj || "gt" in predObj || "lt" in predObj || "in" in predObj;
+    if (isScalarOp) {
+      let val = measurement;
+      if (measurement !== null && typeof measurement === "object" && !Array.isArray(measurement)) {
+        const mObj = measurement;
+        if ("count" in mObj && typeof mObj.count === "number") {
+          val = mObj.count;
+        } else if ("value" in mObj) {
+          val = mObj.value;
+        }
+      }
+      if ("eq" in predObj && val !== predObj.eq)
+        return false;
+      if ("gte" in predObj && (typeof val !== "number" || val < predObj.gte))
+        return false;
+      if ("lte" in predObj && (typeof val !== "number" || val > predObj.lte))
+        return false;
+      if ("gt" in predObj && (typeof val !== "number" || val <= predObj.gt))
+        return false;
+      if ("lt" in predObj && (typeof val !== "number" || val >= predObj.lt))
+        return false;
+      if ("in" in predObj) {
+        const inList = predObj.in;
+        if (!Array.isArray(inList) || !inList.includes(val))
+          return false;
+      }
+      return true;
+    }
+    if (measurement === null || typeof measurement !== "object") {
+      return false;
+    }
+    const mObj = measurement;
+    for (const [key, subPred] of Object.entries(predObj)) {
+      const actualVal = mObj[key];
+      if (typeof subPred === "object" && subPred !== null) {
+        if (!evaluatePredicate(subPred, actualVal))
+          return false;
+      } else {
+        if (actualVal !== subPred)
+          return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+function formatExpectation(expect) {
+  if (expect === true)
+    return "";
+  if (expect === false)
+    return " (expect none)";
+  if (typeof expect === "object" && expect !== null) {
+    const entries = Object.entries(expect);
+    const first = entries[0];
+    if (entries.length === 1 && first !== undefined && ["eq", "gte", "lte", "gt", "lt", "in"].includes(first[0])) {
+      const [op, val] = first;
+      const opSymbol = op === "eq" ? "==" : op === "gte" ? ">=" : op === "lte" ? "<=" : op;
+      return ` (expect ${opSymbol} ${Array.isArray(val) ? `[${val.join(", ")}]` : String(val)})`;
+    }
+    const formatted = entries.map(([k, v]) => {
+      if (typeof v === "object" && v !== null) {
+        const subEntries = Object.entries(v);
+        const firstSub = subEntries[0];
+        if (subEntries.length === 1 && firstSub !== undefined && ["eq", "gte", "lte", "gt", "lt", "in"].includes(firstSub[0])) {
+          const [op, val] = firstSub;
+          const opSymbol = op === "eq" ? "==" : op === "gte" ? ">=" : op === "lte" ? "<=" : op;
+          return `${k} ${opSymbol} ${Array.isArray(val) ? `[${val.join(", ")}]` : String(val)}`;
+        }
+      }
+      return `${k}=${String(v)}`;
+    }).join(", ");
+    return ` (expect ${formatted})`;
+  }
+  return ` (expect ${String(expect)})`;
+}
+function describeClaim(claim) {
+  if (isCompositeClaimKind(claim.kind)) {
+    const sub = (claim.claims ?? []).map(describeClaim).join(", ");
+    const exp = formatExpectation(claim.expect);
+    return `${claim.kind}(${sub})${exp !== "" ? ` ${exp.trim()}` : ""}`;
+  }
+  const parts = [claim.kind];
+  if (claim.expression !== undefined && claim.expression.trim() !== "") {
+    parts.push(claim.expression.trim());
+  }
+  if (claim.params !== undefined) {
+    const paramEntries = Object.entries(claim.params);
+    if (paramEntries.length > 0) {
+      parts.push(paramEntries.map(([k, v]) => `${k}=${typeof v === "object" && v !== null ? JSON.stringify(v) : v}`).join(" "));
+    }
+  }
+  const exp = formatExpectation(claim.expect);
+  if (exp !== "")
+    parts.push(exp.trim());
+  return parts.join(" ");
+}
 // yojana-core/src/revision.ts
 import { createHash as createHash2 } from "crypto";
 var REQUIREMENT_ID = /^[a-z][a-z0-9-]{0,63}$/;
@@ -2559,6 +2728,13 @@ function assertChangeId(id) {
   }
   return id;
 }
+var ACTION_ID = /^act-[a-z0-9-]{1,60}$/;
+function assertActionId(id) {
+  if (!ACTION_ID.test(id)) {
+    throw new InvalidArgumentError("action id", "lowercase kebab-case starting with act-, 5-64 chars", id);
+  }
+  return id;
+}
 function normalizeContent(text) {
   return text.replace(/\r\n?/g, `
 `).split(`
@@ -2566,9 +2742,38 @@ function normalizeContent(text) {
 `).trim();
 }
 var REVISION_HEX_CHARS = 16;
+function sortKeys(value) {
+  if (value === null || typeof value !== "object")
+    return value;
+  if (Array.isArray(value))
+    return value.map(sortKeys);
+  const obj = value;
+  const sorted = {};
+  for (const k of Object.keys(obj).sort()) {
+    sorted[k] = sortKeys(obj[k]);
+  }
+  return sorted;
+}
+function canonicalClaim(claim) {
+  if (claim.expression !== undefined && typeof claim.expect === "boolean" && (claim.params === undefined || Object.keys(claim.params).length === 0) && (claim.claims === undefined || claim.claims.length === 0)) {
+    return `claim ${claim.kind} ${claim.expect} ${claim.expression.trim()}`;
+  }
+  const parts = [`claim ${claim.kind}`];
+  if (claim.expression !== undefined && claim.expression.trim() !== "") {
+    parts.push(`expr:${claim.expression.trim()}`);
+  }
+  if (claim.params !== undefined && Object.keys(claim.params).length > 0) {
+    parts.push(`params:${JSON.stringify(sortKeys(claim.params))}`);
+  }
+  if (claim.claims !== undefined && claim.claims.length > 0) {
+    parts.push(`claims:[${claim.claims.map(canonicalClaim).join(",")}]`);
+  }
+  parts.push(`expect:${typeof claim.expect === "object" && claim.expect !== null ? JSON.stringify(sortKeys(claim.expect)) : claim.expect}`);
+  return parts.join(" ");
+}
 function requirementRevision(requirement) {
   const { id, title, text, claims } = requirement;
-  const claimLines = claims.map((c) => `claim ${c.kind} ${c.expect} ${c.expression.trim()}`);
+  const claimLines = claims.map(canonicalClaim);
   const work = [...requirement.workItems ?? []].sort();
   const workLines = work.length > 0 ? [`work ${work.join(",")}`] : [];
   return revisionHash(id, [`title ${title.trim()}`, normalizeContent(text), ...claimLines, ...workLines].join(`
@@ -2579,10 +2784,124 @@ function revisionHash(id, text) {
 ${normalizeContent(text)}`).digest("hex");
   return `r_${digest.slice(0, REVISION_HEX_CHARS)}`;
 }
+function actionsRevision(id, actions) {
+  const lines = actions.map((a) => {
+    const work = [...a.workItems ?? []].sort();
+    const workPart = work.length > 0 ? ` work ${work.join(",")}` : "";
+    const claims = a.claims ?? [];
+    const claimParts = claims.map((c) => ` ${canonicalClaim(c)}`).join("");
+    return `action ${a.id} ${normalizeContent(a.text)}${workPart}${claimParts}`;
+  });
+  return revisionHash(id, `actions
+${lines.join(`
+`)}`);
+}
+// yojana-core/src/verifier-port.ts
+function computeClaimCacheKey(options) {
+  const parts = [
+    options.requirement,
+    options.action ?? "",
+    canonicalClaim(options.claim),
+    options.adapterVersion ?? "",
+    options.indexState ?? ""
+  ];
+  return parts.join("::");
+}
+async function getClaimKindDescriptor(verifier, kind) {
+  if (verifier === undefined)
+    return;
+  if (typeof verifier.describe === "function") {
+    const desc = await verifier.describe();
+    const found = desc.kinds.find((k) => k.kind === kind);
+    if (found !== undefined)
+      return found;
+  }
+  return {
+    kind,
+    expression: true,
+    deterministic: true,
+    version: verifier.name
+  };
+}
+function validateClaimSchema(claim, descriptor) {
+  const errors = [];
+  if (claim.expression !== undefined && descriptor.expression !== true) {
+    if (!descriptor.params || !("expression" in descriptor.params)) {
+      errors.push({
+        code: "INVALID_CLAIM",
+        message: `claim kind "${descriptor.kind}" does not support expression shorthand; use parameters`
+      });
+    }
+  }
+  if (descriptor.params !== undefined) {
+    for (const [paramName, schema] of Object.entries(descriptor.params)) {
+      if (schema.required) {
+        const val = claim.params?.[paramName];
+        const hasExpr = claim.expression !== undefined && descriptor.expression === true;
+        if (val === undefined && !hasExpr) {
+          errors.push({
+            code: "MISSING_CLAIM_PARAM",
+            message: `claim kind "${descriptor.kind}" requires parameter "${paramName}"`
+          });
+        }
+      }
+    }
+    if (claim.params !== undefined) {
+      for (const [paramName, val] of Object.entries(claim.params)) {
+        const schema = descriptor.params[paramName];
+        if (schema === undefined) {
+          const known = Object.keys(descriptor.params).sort().join(", ");
+          errors.push({
+            code: "UNKNOWN_CLAIM_PARAM",
+            message: `unknown parameter "${paramName}" for claim kind "${descriptor.kind}"; known parameters: ${known}`
+          });
+        } else {
+          let valid = true;
+          switch (schema.type) {
+            case "string":
+              valid = typeof val === "string";
+              break;
+            case "number":
+              valid = typeof val === "number";
+              break;
+            case "boolean":
+              valid = typeof val === "boolean";
+              break;
+            case "array":
+              valid = Array.isArray(val);
+              break;
+            case "object":
+              valid = typeof val === "object" && val !== null && !Array.isArray(val);
+              break;
+          }
+          if (!valid) {
+            errors.push({
+              code: "INVALID_CLAIM_PARAM",
+              message: `parameter "${paramName}" on claim kind "${descriptor.kind}" must be ${schema.type}, got ${Array.isArray(val) ? "array" : typeof val}`
+            });
+          }
+        }
+      }
+    }
+  }
+  return errors;
+}
+function evaluateClaimOutcome(claim, result) {
+  if (result.outcome === "unverifiable") {
+    return "unverifiable";
+  }
+  if (result.measurements !== undefined) {
+    return evaluatePredicate(claim.expect, result.measurements) ? "holds" : "violated";
+  }
+  return result.outcome;
+}
 // yojana-markdown/src/document.ts
 var REQUIREMENT_HEADING = /^##\s+(?:(ADDED|MODIFIED|REMOVED)\s+)?Requirement:\s*(.*?)\s*(?:\{#([^}]*)\})?\s*$/;
 var LEVEL2_HEADING = /^##\s/;
 var TITLE_HEADING = /^#\s+(.*?)\s*#*\s*$/;
+var ACTIONS_HEADING = /^###\s+Actions\s*$/i;
+var LEVEL3_HEADING = /^###\s/;
+var ACTION_ITEM = /^[-*]\s+(?:\[[ xX]\]\s+)?(.*?)(?:\s*\{#([^}]*)\})?\s*$/;
 var FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})\s*([^\s`]*)/;
 var FRONTMATTER_FENCE = "---";
 var GIT_CONFLICT_MARKER = /^(<{7} |={7}$|>{7} )/;
@@ -2650,8 +2969,18 @@ function parseDocument(input, issue) {
       return;
     }
     const claim = parseClaim(block, issue);
-    if (claim !== undefined)
+    if (claim === undefined)
+      return;
+    if (section.draft.inActions) {
+      const lastAction = section.draft.actions[section.draft.actions.length - 1];
+      if (lastAction === undefined) {
+        issue(block.line, "CLAIM_WITHOUT_ACTION", "a claim under ### Actions must follow an action item");
+      } else {
+        lastAction.claims.push(claim);
+      }
+    } else {
       section.draft.claims.push(claim);
+    }
   };
   for (let i = closing + 1;i < lines.length; i++) {
     const line = lines[i] ?? "";
@@ -2700,7 +3029,9 @@ function parseDocument(input, issue) {
           attributes,
           line: lineNo,
           lines: [],
-          claims: []
+          claims: [],
+          inActions: false,
+          actions: []
         }
       });
       sawContent = true;
@@ -2710,6 +3041,43 @@ function parseDocument(input, issue) {
       sections.push({ kind: "prose", lines: [line] });
       sawContent = true;
       continue;
+    }
+    const cur = current();
+    if (cur.kind === "requirement") {
+      if (ACTIONS_HEADING.test(line)) {
+        cur.draft.inActions = true;
+        sawContent = true;
+        continue;
+      }
+      if (cur.draft.inActions) {
+        if (LEVEL3_HEADING.test(line)) {
+          cur.draft.inActions = false;
+        } else if (line.trim() === "") {
+          continue;
+        } else {
+          const actMatch = ACTION_ITEM.exec(line);
+          if (actMatch !== null) {
+            const [id, ...attributes] = (actMatch[2] ?? "").trim().split(/\s+/);
+            cur.draft.actions.push({
+              id: actMatch[2] === undefined ? undefined : id,
+              text: (actMatch[1] ?? "").trim(),
+              attributes: attributes.filter((a) => a !== ""),
+              line: lineNo,
+              claims: []
+            });
+            sawContent = true;
+            continue;
+          }
+          if (cur.draft.actions.length > 0) {
+            const lastAct = cur.draft.actions[cur.draft.actions.length - 1];
+            if (lastAct !== undefined) {
+              lastAct.text = `${lastAct.text} ${line.trim()}`;
+            }
+            sawContent = true;
+            continue;
+          }
+        }
+      }
     }
     if (line.trim() !== "")
       sawContent = true;
@@ -2757,12 +3125,62 @@ function parseDocument(input, issue) {
     }
     if (badAttribute)
       continue;
+    const seenActions = new Map;
+    const parsedActions = [];
+    let badAction = false;
+    for (const actDraft of draft.actions) {
+      if (actDraft.id === undefined || actDraft.id === "") {
+        issue(actDraft.line, "MISSING_ACTION_ID", "add an id: - <text> {#act-id}");
+        badAction = true;
+        continue;
+      }
+      try {
+        assertActionId(actDraft.id);
+      } catch (error) {
+        issue(actDraft.line, "INVALID_ACTION_ID", String(error));
+        badAction = true;
+        continue;
+      }
+      const firstAct = seenActions.get(actDraft.id);
+      if (firstAct !== undefined) {
+        issue(actDraft.line, "DUPLICATE_ACTION_ID", `id ${actDraft.id} is already used on line ${firstAct}`);
+        badAction = true;
+        continue;
+      }
+      seenActions.set(actDraft.id, actDraft.line);
+      let actionWorkItems = [];
+      let badActionAttr = false;
+      for (const attr of actDraft.attributes) {
+        const [key, value = ""] = attr.split("=", 2);
+        if ((key === "bead" || key === "beads") && value !== "") {
+          actionWorkItems = value.split(",").filter((b) => b !== "");
+        } else {
+          issue(actDraft.line, "INVALID_ACTION_ATTRIBUTE", `"${attr}" is not understood; known: bead=<id> or beads=<id>[,<id>...]`);
+          badActionAttr = true;
+        }
+      }
+      if (badActionAttr) {
+        badAction = true;
+        continue;
+      }
+      parsedActions.push({
+        id: actDraft.id,
+        text: actDraft.text,
+        ...actionWorkItems.length > 0 ? { workItems: actionWorkItems } : {},
+        ...actDraft.claims.length > 0 ? { claims: actDraft.claims } : {}
+      });
+    }
+    if (badAction)
+      continue;
+    const actions = parsedActions.length > 0 ? parsedActions : undefined;
+    const actionsRev = actions !== undefined ? actionsRevision(draft.id, actions) : undefined;
     const fields = {
       id: draft.id,
       title: draft.title,
       text: normalizeContent(draft.lines.join(`
 `)),
       claims: draft.claims,
+      ...actions !== undefined ? { actions, actionsRevision: actionsRev } : {},
       ...workItems.length > 0 ? { workItems } : {}
     };
     parts.push({
@@ -2783,25 +3201,139 @@ function parseClaim(block, issue) {
     issue(block.line, "INVALID_CLAIM", `claim is not valid YAML: ${String(error)}`);
     return;
   }
+  return parseClaimRecord(raw, block.line, issue);
+}
+function parseClaimRecord(raw, line, issue) {
   if (!isRecord3(raw)) {
-    issue(block.line, "INVALID_CLAIM", "a claim is a mapping with kind, expression and expect");
+    issue(line, "INVALID_CLAIM", "a claim is a mapping with kind, expression/params and expect");
     return;
   }
-  const { kind, expression } = raw;
+  let kind;
+  if (typeof raw.kind === "string" && raw.kind.trim() !== "") {
+    kind = raw.kind.trim();
+  } else if ("all" in raw) {
+    kind = "all";
+  } else if ("any" in raw) {
+    kind = "any";
+  } else if ("not" in raw) {
+    kind = "not";
+  }
+  if (kind === undefined) {
+    issue(line, "INVALID_CLAIM", "claim needs a non-empty string `kind`");
+    return;
+  }
+  if (kind === "all" || kind === "any") {
+    let rawChildren = raw.claims;
+    if (rawChildren === undefined && kind === "all")
+      rawChildren = raw.all;
+    if (rawChildren === undefined && kind === "any")
+      rawChildren = raw.any;
+    if (!Array.isArray(rawChildren)) {
+      issue(line, "INVALID_CLAIM", `"${kind}" claim requires a list of child claims under "claims"`);
+      return;
+    }
+    if (rawChildren.length === 0) {
+      issue(line, "INVALID_CLAIM", `"${kind}" claim requires at least one child claim`);
+      return;
+    }
+    const childClaims = [];
+    for (const childRaw of rawChildren) {
+      const child = parseClaimRecord(childRaw, line, issue);
+      if (child === undefined)
+        return;
+      childClaims.push(child);
+    }
+    const expect = raw.expect ?? true;
+    if (typeof expect !== "boolean" && !isRecord3(expect)) {
+      issue(line, "INVALID_CLAIM", "`expect` must be boolean or a predicate mapping");
+      return;
+    }
+    return {
+      kind,
+      claims: childClaims,
+      expect
+    };
+  }
+  if (kind === "not") {
+    let rawChild = raw.claim;
+    if (rawChild === undefined && "not" in raw) {
+      rawChild = raw.not;
+    }
+    if (rawChild === undefined && "claims" in raw) {
+      if (Array.isArray(raw.claims)) {
+        if (raw.claims.length === 1) {
+          rawChild = raw.claims[0];
+        } else {
+          issue(line, "INVALID_CLAIM", '"not" claim requires a single child claim (use "all" or "any" to combine multiple)');
+          return;
+        }
+      } else {
+        rawChild = raw.claims;
+      }
+    }
+    if (Array.isArray(rawChild)) {
+      if (rawChild.length === 1) {
+        rawChild = rawChild[0];
+      } else {
+        issue(line, "INVALID_CLAIM", '"not" claim requires a single child claim (use "all" or "any" to combine multiple)');
+        return;
+      }
+    }
+    if (!isRecord3(rawChild)) {
+      issue(line, "INVALID_CLAIM", '"not" claim requires a child claim');
+      return;
+    }
+    const child = parseClaimRecord(rawChild, line, issue);
+    if (child === undefined)
+      return;
+    const expect = raw.expect ?? true;
+    if (typeof expect !== "boolean" && !isRecord3(expect)) {
+      issue(line, "INVALID_CLAIM", "`expect` must be boolean or a predicate mapping");
+      return;
+    }
+    return {
+      kind: "not",
+      claims: [child],
+      expect
+    };
+  }
+  let expression;
+  if ("expression" in raw) {
+    if (typeof raw.expression !== "string" || raw.expression.trim() === "") {
+      issue(line, "INVALID_CLAIM", "`expression` must be a non-empty string");
+      return;
+    }
+    expression = raw.expression.trim();
+  }
+  const params = {};
+  if ("params" in raw) {
+    if (isRecord3(raw.params)) {
+      Object.assign(params, raw.params);
+    } else {
+      issue(line, "INVALID_CLAIM", "`params` must be a mapping");
+      return;
+    }
+  }
+  for (const [key, val] of Object.entries(raw)) {
+    if (key !== "kind" && key !== "expression" && key !== "expect" && key !== "params") {
+      params[key] = val;
+    }
+  }
   const expect = raw.expect ?? true;
-  if (typeof kind !== "string" || kind.trim() === "") {
-    issue(block.line, "INVALID_CLAIM", "claim needs a non-empty string `kind`");
+  if (typeof expect !== "boolean" && !isRecord3(expect)) {
+    issue(line, "INVALID_CLAIM", "`expect` must be boolean or a predicate mapping");
     return;
   }
-  if (typeof expression !== "string" || expression.trim() === "") {
-    issue(block.line, "INVALID_CLAIM", "claim needs a non-empty string `expression`");
+  if (expression === undefined && Object.keys(params).length === 0) {
+    issue(line, "INVALID_CLAIM", "claim needs an `expression` or parameters");
     return;
   }
-  if (typeof expect !== "boolean") {
-    issue(block.line, "INVALID_CLAIM", "`expect` must be true or false");
-    return;
-  }
-  return { kind: kind.trim(), expression: expression.trim(), expect };
+  return {
+    kind,
+    ...expression !== undefined ? { expression } : {},
+    ...Object.keys(params).length > 0 ? { params } : {},
+    expect
+  };
 }
 function resolveTitle(doc, fallback, issue) {
   const fromMeta = typeof doc.meta.title === "string" ? doc.meta.title.trim() : "";
@@ -2929,14 +3461,73 @@ function yamlString(value) {
     return quoted;
   }
 }
+function renderYamlMapping(obj, indent = "") {
+  const lines = [];
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === null || value === undefined)
+      continue;
+    if (typeof value === "object") {
+      if (Array.isArray(value)) {
+        lines.push(`${indent}${key}: [${value.map((v) => typeof v === "string" ? yamlString(v) : JSON.stringify(v)).join(", ")}]`);
+      } else {
+        lines.push(`${indent}${key}:`);
+        lines.push(...renderYamlMapping(value, `${indent}  `));
+      }
+    } else if (typeof value === "string") {
+      lines.push(`${indent}${key}: ${yamlString(value)}`);
+    } else {
+      lines.push(`${indent}${key}: ${value}`);
+    }
+  }
+  return lines;
+}
+function renderClaimBody(claim, indent = "") {
+  const lines = [`${indent}kind: ${yamlString(claim.kind)}`];
+  if (claim.expression !== undefined && claim.expression.trim() !== "") {
+    lines.push(`${indent}expression: ${yamlString(claim.expression)}`);
+  }
+  if (claim.params !== undefined && Object.keys(claim.params).length > 0) {
+    lines.push(...renderYamlMapping(claim.params, indent));
+  }
+  if (claim.claims !== undefined && claim.claims.length > 0) {
+    if (claim.kind === "not" && claim.claims.length === 1 && claim.claims[0] !== undefined) {
+      lines.push(`${indent}claim:`);
+      lines.push(...renderClaimBody(claim.claims[0], `${indent}  `));
+    } else {
+      lines.push(`${indent}claims:`);
+      for (const child of claim.claims) {
+        const childLines = renderClaimBody(child, `${indent}    `);
+        if (childLines.length > 0 && childLines[0] !== undefined) {
+          lines.push(`${indent}  - ${childLines[0].trimStart()}`);
+          for (const remaining of childLines.slice(1)) {
+            lines.push(remaining);
+          }
+        }
+      }
+    }
+  }
+  if (claim.expect === false) {
+    lines.push(`${indent}expect: false`);
+  } else if (typeof claim.expect === "object" && claim.expect !== null) {
+    lines.push(`${indent}expect:`);
+    lines.push(...renderYamlMapping(claim.expect, `${indent}  `));
+  }
+  return lines;
+}
 function renderClaim(claim) {
-  return [
-    "```yojana:claim",
-    `kind: ${yamlString(claim.kind)}`,
-    `expression: ${yamlString(claim.expression)}`,
-    ...claim.expect ? [] : ["expect: false"],
-    "```"
-  ].join(`
+  const lines = ["```yojana:claim", ...renderClaimBody(claim), "```"];
+  return lines.join(`
+`);
+}
+function renderAction(action) {
+  const work = action.workItems ?? [];
+  const links = work.length === 1 ? ` bead=${work[0]}` : work.length > 1 ? ` beads=${work.join(",")}` : "";
+  const lines = [`- ${action.text} {#${action.id}${links}}`];
+  if (action.claims !== undefined && action.claims.length > 0) {
+    for (const claim of action.claims)
+      lines.push(renderClaim(claim));
+  }
+  return lines.join(`
 `);
 }
 function renderRequirement(requirement, marker = "") {
@@ -2947,6 +3538,12 @@ function renderRequirement(requirement, marker = "") {
     blocks.push(requirement.text);
   for (const claim of requirement.claims)
     blocks.push(renderClaim(claim));
+  if (requirement.actions !== undefined && requirement.actions.length > 0) {
+    blocks.push(`### Actions
+
+${requirement.actions.map(renderAction).join(`
+`)}`);
+  }
   return blocks.join(`
 
 `);
@@ -3196,11 +3793,12 @@ async function openChange(options) {
     }
     const id = delta.op === "remove" ? delta.id : delta.requirement.id;
     const base = heads.get(id);
-    if (base === undefined) {
+    const headReq = state.plans.get(draft.planId)?.heads.get(id);
+    if (base === undefined || headReq === undefined) {
       refuse(id, "NOT_FOUND", `${id} is not in ${draft.planId}; use ADDED`);
     } else if (delta.op === "remove") {
       deltas.push({ op: "remove", id, base });
-    } else if (delta.requirement.revision === base) {
+    } else if (delta.requirement.revision === base && delta.requirement.actionsRevision === headReq.actionsRevision) {
       refuse(id, "UNCHANGED", `${id} is marked MODIFIED but reads the same as the plan`);
     } else {
       deltas.push({ op: "modify", requirement: delta.requirement, base });
@@ -3265,8 +3863,12 @@ async function archiveChange(options) {
       break;
     }
   }
-  const logStatus = state.plans.get(change.planId)?.status;
-  const inStep = found?.plan !== undefined && found.plan.status === logStatus && found.plan.requirements.length === heads.size && found.plan.requirements.every((r) => heads.get(r.id) === r.revision);
+  const logPlan = state.plans.get(change.planId);
+  const logStatus = logPlan?.status;
+  const inStep = found?.plan !== undefined && found.plan.status === logStatus && found.plan.requirements.length === heads.size && found.plan.requirements.every((r) => {
+    const head = logPlan?.heads.get(r.id);
+    return head !== undefined && head.revision === r.revision && head.actionsRevision === r.actionsRevision;
+  });
   await store.append({ type: "change-archived", changeId }, actor);
   let planFile;
   if (found?.plan === undefined) {
@@ -3305,12 +3907,155 @@ async function abandonChange(options) {
   return { outcome: "abandoned", change: entry.change, problems: [] };
 }
 // yojana/src/check.ts
+async function verifyOneClaim(requirementId, actionId, claim, byKind, known, cache) {
+  if (isCompositeClaimKind(claim.kind)) {
+    const childClaims = claim.claims ?? [];
+    if (childClaims.length === 0) {
+      return {
+        requirement: requirementId,
+        ...actionId !== undefined ? { action: actionId } : {},
+        claim,
+        outcome: "unverifiable",
+        evidence: `composite claim "${claim.kind}" has no child claims`,
+        deterministic: true
+      };
+    }
+    const childResults = await Promise.all(childClaims.map((c) => verifyOneClaim(requirementId, actionId, c, byKind, known, cache)));
+    let baseOutcome;
+    let evidence;
+    if (claim.kind === "all") {
+      const anyViolated = childResults.some((r) => r.outcome === "violated");
+      const anyUnverifiable = childResults.some((r) => r.outcome === "unverifiable");
+      if (anyViolated) {
+        baseOutcome = "violated";
+      } else if (anyUnverifiable) {
+        baseOutcome = "unverifiable";
+      } else {
+        baseOutcome = "holds";
+      }
+      const held = childResults.filter((r) => r.outcome === "holds").length;
+      evidence = baseOutcome === "holds" ? `all ${childResults.length} claims hold:
+` + childResults.map((r, i) => `  ${i + 1}. [holds] ${describeClaim(r.claim)}: ${r.evidence}`).join(`
+`) : `${childResults.length - held} of ${childResults.length} claims not holding:
+` + childResults.map((r, i) => `  ${i + 1}. [${r.outcome}] ${describeClaim(r.claim)}: ${r.evidence}`).join(`
+`);
+    } else if (claim.kind === "any") {
+      const anyHolds = childResults.some((r) => r.outcome === "holds");
+      const anyUnverifiable = childResults.some((r) => r.outcome === "unverifiable");
+      if (anyHolds) {
+        baseOutcome = "holds";
+      } else if (anyUnverifiable) {
+        baseOutcome = "unverifiable";
+      } else {
+        baseOutcome = "violated";
+      }
+      const held = childResults.filter((r) => r.outcome === "holds").length;
+      evidence = baseOutcome === "holds" ? `${held} of ${childResults.length} claims hold:
+` + childResults.map((r, i) => `  ${i + 1}. [${r.outcome}] ${describeClaim(r.claim)}: ${r.evidence}`).join(`
+`) : `all ${childResults.length} claims violated:
+` + childResults.map((r, i) => `  ${i + 1}. [${r.outcome}] ${describeClaim(r.claim)}: ${r.evidence}`).join(`
+`);
+    } else {
+      const child = childResults[0];
+      if (child === undefined) {
+        baseOutcome = "unverifiable";
+        evidence = "not claim has no child claim";
+      } else {
+        if (child.outcome === "holds") {
+          baseOutcome = "violated";
+        } else if (child.outcome === "violated") {
+          baseOutcome = "holds";
+        } else {
+          baseOutcome = "unverifiable";
+        }
+        evidence = `not (${describeClaim(child.claim)}): child is ${child.outcome} (${child.evidence})`;
+      }
+    }
+    const heldCount = childResults.filter((r) => r.outcome === "holds").length;
+    const measurements = { count: heldCount, total: childResults.length };
+    let outcome = baseOutcome;
+    if (baseOutcome !== "unverifiable") {
+      if (claim.expect === false) {
+        outcome = baseOutcome === "holds" ? "violated" : "holds";
+      } else if (typeof claim.expect === "object" && claim.expect !== null) {
+        outcome = evaluatePredicate(claim.expect, measurements) ? "holds" : "violated";
+      }
+    }
+    const deterministic = childResults.every((r) => r.deterministic !== false);
+    const measuredAt = deterministic ? undefined : Math.max(...childResults.map((r) => r.measuredAt ?? 0)) || Date.now();
+    return {
+      requirement: requirementId,
+      ...actionId !== undefined ? { action: actionId } : {},
+      claim,
+      outcome,
+      evidence,
+      measurements,
+      deterministic,
+      ...measuredAt !== undefined ? { measuredAt } : {}
+    };
+  }
+  const verifier = byKind.get(claim.kind);
+  if (verifier === undefined) {
+    return {
+      requirement: requirementId,
+      ...actionId !== undefined ? { action: actionId } : {},
+      claim,
+      outcome: "unverifiable",
+      evidence: `no verifier for kind "${claim.kind}"; known kinds: ${known}`,
+      deterministic: true
+    };
+  }
+  const descriptor = await getClaimKindDescriptor(verifier, claim.kind);
+  const deterministic = descriptor?.deterministic ?? true;
+  if (deterministic && cache !== undefined) {
+    const indexState = await verifier.indexState?.();
+    const cacheKey = computeClaimCacheKey({
+      requirement: requirementId,
+      action: actionId,
+      claim,
+      adapterVersion: descriptor?.version ?? verifier.name,
+      indexState
+    });
+    const cached = await cache.get(cacheKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const raw = await verifier.verify(requirementId, claim);
+    const outcome = evaluateClaimOutcome(claim, raw);
+    const result = {
+      ...raw,
+      requirement: requirementId,
+      ...actionId !== undefined ? { action: actionId } : {},
+      outcome,
+      deterministic: true
+    };
+    await cache.set(cacheKey, result);
+    return result;
+  }
+  const raw = await verifier.verify(requirementId, claim);
+  const outcome = evaluateClaimOutcome(claim, raw);
+  const result = {
+    ...raw,
+    requirement: requirementId,
+    ...actionId !== undefined ? { action: actionId } : {},
+    outcome,
+    deterministic,
+    ...deterministic ? {} : { measuredAt: raw.measuredAt ?? Date.now() }
+  };
+  return result;
+}
 async function check(options) {
   const state = foldLog(await options.store.events());
   const byKind = new Map;
   for (const verifier of options.verifiers) {
-    for (const kind of verifier.kinds)
-      byKind.set(kind, verifier);
+    if (verifier.kinds.length === 0 && typeof verifier.describe === "function") {
+      const desc = await verifier.describe();
+      for (const kind of desc.kinds)
+        byKind.set(kind.kind, verifier);
+    } else {
+      for (const kind of verifier.kinds)
+        byKind.set(kind, verifier);
+    }
   }
   const known = [...byKind.keys()].sort().join(", ");
   const plans = [];
@@ -3320,13 +4065,12 @@ async function check(options) {
     const results = [];
     for (const requirement of plan.heads.values()) {
       for (const claim of requirement.claims) {
-        const verifier = byKind.get(claim.kind);
-        results.push(verifier === undefined ? {
-          requirement: requirement.id,
-          claim,
-          outcome: "unverifiable",
-          evidence: `no verifier for kind "${claim.kind}"; known kinds: ${known}`
-        } : await verifier.verify(requirement.id, claim));
+        results.push(await verifyOneClaim(requirement.id, undefined, claim, byKind, known, options.cache));
+      }
+      for (const action of requirement.actions ?? []) {
+        for (const claim of action.claims ?? []) {
+          results.push(await verifyOneClaim(requirement.id, action.id, claim, byKind, known, options.cache));
+        }
       }
     }
     plans.push({ planId: plan.id, results });
@@ -3422,7 +4166,7 @@ async function recordDecision(request) {
   if (!isDecision(request.decision)) {
     return refuse("INVALID", `a decision is one of ${WORK_DECISIONS.join(", ")}`);
   }
-  const linked = requirement.workItems ?? [];
+  const linked = requirementWorkItems(requirement);
   if (!linked.includes(request.item)) {
     return refuse("NOT_LINKED", `${request.item} is not linked to ${requirement.id}${linked.length > 0 ? ` (it links ${linked.join(", ")})` : ""}`);
   }
@@ -3551,6 +4295,36 @@ async function ingest(options) {
       continue;
     }
     seenPlans.set(plan.id, file.source);
+    if (options.verifiers !== undefined && options.verifiers.length > 0) {
+      const descriptorsByKind = new Map;
+      for (const v of options.verifiers) {
+        if (typeof v.describe === "function") {
+          const desc = await v.describe();
+          for (const k of desc.kinds)
+            descriptorsByKind.set(k.kind, k);
+        } else {
+          for (const k of v.kinds) {
+            descriptorsByKind.set(k, { kind: k, expression: true, deterministic: true });
+          }
+        }
+      }
+      const knownKinds = [...descriptorsByKind.keys()].sort().join(", ");
+      const claimIssues = [];
+      for (const req of plan.requirements) {
+        for (const claim of req.claims) {
+          claimIssues.push(...validateClaimRecursive(claim, `requirement ${req.id}`, file.source, descriptorsByKind, knownKinds));
+        }
+        for (const act of req.actions ?? []) {
+          for (const claim of act.claims ?? []) {
+            claimIssues.push(...validateClaimRecursive(claim, `action ${act.id}`, file.source, descriptorsByKind, knownKinds));
+          }
+        }
+      }
+      if (claimIssues.length > 0) {
+        reports.push(invalid(file.source, plan.id, claimIssues));
+        continue;
+      }
+    }
     const state = foldLog(await store.events());
     const logPlan = state.plans.get(plan.id);
     const savedBase = await bases.get(plan.id);
@@ -3683,6 +4457,54 @@ function invalid(source, planId, issues) {
     appended: 0
   };
 }
+function validateClaimRecursive(claim, context, source, descriptorsByKind, knownKinds) {
+  const issues = [];
+  if (isCompositeClaimKind(claim.kind)) {
+    const children = claim.claims ?? [];
+    if (children.length === 0) {
+      issues.push({
+        source,
+        line: undefined,
+        code: "INVALID_CLAIM",
+        message: `composite claim "${claim.kind}" requires at least one child claim in ${context}`
+      });
+      return issues;
+    }
+    if (claim.kind === "not" && children.length > 1) {
+      issues.push({
+        source,
+        line: undefined,
+        code: "INVALID_CLAIM",
+        message: `composite claim "not" requires a single child claim in ${context}`
+      });
+      return issues;
+    }
+    for (const child of children) {
+      issues.push(...validateClaimRecursive(child, `composite claim "${claim.kind}" in ${context}`, source, descriptorsByKind, knownKinds));
+    }
+    return issues;
+  }
+  const desc = descriptorsByKind.get(claim.kind);
+  if (desc === undefined) {
+    issues.push({
+      source,
+      line: undefined,
+      code: "UNKNOWN_CLAIM_KIND",
+      message: `unknown claim kind "${claim.kind}" in ${context}; known kinds: ${knownKinds}`
+    });
+  } else {
+    const errs = validateClaimSchema(claim, desc);
+    for (const err of errs) {
+      issues.push({
+        source,
+        line: undefined,
+        code: err.code,
+        message: `${err.message} in ${context}`
+      });
+    }
+  }
+  return issues;
+}
 
 // yojana/src/edit.ts
 async function current(request) {
@@ -3714,6 +4536,7 @@ function rewritten(head, title, text) {
     title: title.trim(),
     text: normalizeContent(text),
     claims: head.claims,
+    ...head.actions !== undefined ? { actions: head.actions, actionsRevision: head.actionsRevision } : {},
     ...head.workItems === undefined ? {} : { workItems: head.workItems }
   };
   return { ...fields, revision: requirementRevision(fields) };
@@ -4288,8 +5111,8 @@ function projectReview(options) {
 }
 function projectSection(input) {
   const { plan, requirement: r, marks } = input;
-  const results = input.checks.filter((c) => c.requirement === r.id);
-  const health = healthOf(results);
+  const reqResults = input.checks.filter((c) => c.requirement === r.id && c.action === undefined);
+  const health = healthOf(reqResults);
   const alignment = input.report?.alignment.find((a) => a.requirement === r.id);
   const touching = input.openChanges.filter((c) => c.change.deltas.some((d) => deltaTarget(d) === r.id));
   const delta = touching[0]?.change.deltas.find((d) => deltaTarget(d) === r.id);
@@ -4298,8 +5121,10 @@ function projectSection(input) {
   const approval = approvalOf(plan, r.id);
   const approved = approval?.verdict === "approved" && !approval.stale;
   const declined = approval?.verdict === "declined" && !approval.stale;
+  const hasActionClose = alignment?.actions?.some((a) => a.mismatch === "claims-hold-work-open");
+  const hasActionReopen = alignment?.actions?.some((a) => a.mismatch === "work-closed-claims-violated");
   const tags = [];
-  if (alignment?.mismatch === "claims-hold-work-open")
+  if (alignment?.mismatch === "claims-hold-work-open" || hasActionClose)
     tags.push("close");
   if (health === "danger")
     tags.push("violated");
@@ -4310,8 +5135,8 @@ function projectSection(input) {
   if (!approved)
     tags.push("unapproved");
   const note = [
-    alignment?.mismatch === "claims-hold-work-open" ? "close?" : "",
-    alignment?.mismatch === "work-closed-claims-violated" ? "reopen?" : "",
+    alignment?.mismatch === "claims-hold-work-open" || hasActionClose ? "close?" : "",
+    alignment?.mismatch === "work-closed-claims-violated" || hasActionReopen ? "reopen?" : "",
     contested ? "contested" : "",
     declined ? "declined" : "",
     touching.length > 0 ? plural(touching.length, "change") : "",
@@ -4323,9 +5148,9 @@ function projectSection(input) {
       label: i.state === undefined ? i.id : `${i.id} \xB7 ${i.state}`,
       ...i.state === "closed" ? { intent: "success" } : {}
     })),
-    ...r.claims.length === 0 ? [] : results.length === 0 ? [{ label: plural(r.claims.length, "claim") }] : [
+    ...r.claims.length === 0 ? [] : reqResults.length === 0 ? [{ label: plural(r.claims.length, "claim") }] : [
       {
-        label: `${results.filter((x) => x.outcome === "holds").length}/${results.length} claims hold`,
+        label: `${reqResults.filter((x) => x.outcome === "holds").length}/${reqResults.length} claims hold`,
         intent: health
       }
     ],
@@ -4393,6 +5218,39 @@ function projectSection(input) {
       });
     }
   }
+  for (const act of alignment?.actions ?? []) {
+    if (act.mismatch === "claims-hold-work-open") {
+      const open = act.items.filter((i) => i.state !== "closed" && !decided(i.id));
+      if (open.length > 0) {
+        flags.push({
+          text: `Action ${act.action}: ${act.holds === 1 ? "its claim holds" : `all ${act.holds} claims hold`}, but ${open.map((i) => i.id).join(", ")} ${open.length === 1 ? "is" : "are"} still open.`,
+          intent: "primary",
+          buttons: open.map((i) => ({
+            action: "decide",
+            label: `Close ${i.id}`,
+            item: i.id,
+            decision: "close",
+            primary: true
+          }))
+        });
+      }
+    }
+    if (act.mismatch === "work-closed-claims-violated") {
+      const closed = act.items.filter((i) => !decided(i.id));
+      if (closed.length > 0) {
+        flags.push({
+          text: `Action ${act.action}: the work is closed but ${plural(act.violated, "claim")} violated: closed too early, or regressed.`,
+          intent: "danger",
+          buttons: closed.map((i) => ({
+            action: "decide",
+            label: `Reopen ${i.id}`,
+            item: i.id,
+            decision: "reopen"
+          }))
+        });
+      }
+    }
+  }
   if (contested) {
     flags.push({
       text: "Edited on two branches at once. Edit it to settle which text stands.",
@@ -4400,10 +5258,36 @@ function projectSection(input) {
     });
   }
   const quoted = plan.annotations.filter((a) => a.requirement === r.id && marks.has(a.id));
-  const evidence = r.claims.map((claim, i) => {
-    const result = results[i];
-    const expression = `${claim.kind} ${claim.expression}${claim.expect ? "" : " (expect none)"}`;
+  const evidence = r.claims.map((claim) => {
+    const result = reqResults.find((cr) => cr.claim === claim || canonicalClaim(cr.claim) === canonicalClaim(claim));
+    const expression = describeClaim(claim);
     return result === undefined ? { label: `${expression} \xB7 not checked` } : { label: `${expression} \xB7 ${result.evidence}`, intent: OUTCOME_INTENT[result.outcome] };
+  });
+  const actions = r.actions?.map((act) => {
+    const actAlign = alignment?.actions?.find((a) => a.action === act.id);
+    const actResults = input.checks.filter((c) => c.requirement === r.id && c.action === act.id);
+    const actItems = (act.workItems ?? []).map((id) => {
+      const item = actAlign?.items.find((i) => i.id === id);
+      const state = item?.state;
+      return {
+        label: state === undefined ? id : `${id} \xB7 ${state}`,
+        ...state === "closed" ? { intent: "success" } : {}
+      };
+    });
+    const actClaims = (act.claims ?? []).map((claim) => {
+      const result = actResults.find((cr) => cr.claim === claim || canonicalClaim(cr.claim) === canonicalClaim(claim));
+      const expression = describeClaim(claim);
+      return result === undefined ? { label: `${expression} \xB7 not checked` } : { label: `${expression} \xB7 ${result.evidence}`, intent: OUTCOME_INTENT[result.outcome] };
+    });
+    const actNote = actAlign?.mismatch === "claims-hold-work-open" ? "close?" : actAlign?.mismatch === "work-closed-claims-violated" ? "reopen?" : undefined;
+    return {
+      id: act.id,
+      text: act.text,
+      done: actAlign?.done ?? false,
+      ...actItems.length > 0 ? { items: actItems } : {},
+      ...actClaims.length > 0 ? { claims: actClaims } : {},
+      ...actNote !== undefined ? { note: actNote } : {}
+    };
   });
   return {
     id: r.id,
@@ -4436,7 +5320,8 @@ function projectSection(input) {
         ...declined ? [] : [{ action: DECLINE_ACTION, label: "Decline" }]
       ]
     },
-    editable: { title: r.title, text: r.text }
+    editable: { title: r.title, text: r.text },
+    ...actions !== undefined ? { actions } : {}
   };
 }
 function projectThreads(plan, state, marks, atOf, isAgent, when, you) {
@@ -4606,6 +5491,131 @@ function projectCallouts(plan, waiting, weigh) {
     }
   ];
 }
+// yojana/src/rule-sink.ts
+async function proposeRules(options) {
+  const state = foldLog(await options.store.events());
+  const proposedEntries = [];
+  const skipped = [];
+  for (const plan of state.plans.values()) {
+    if (options.planId !== undefined && plan.id !== options.planId)
+      continue;
+    const planCheck = options.checkReport.plans.find((p) => p.planId === plan.id);
+    const results = planCheck?.results ?? [];
+    let itemsById = new Map;
+    if (options.worklink !== undefined) {
+      const allWorkItems = [
+        ...new Set(Array.from(plan.heads.values()).flatMap((r) => [
+          ...requirementWorkItems(r),
+          ...(r.actions ?? []).flatMap((a) => a.workItems ?? [])
+        ]))
+      ];
+      if (allWorkItems.length > 0) {
+        const lookup = await options.worklink.get(allWorkItems);
+        if (lookup.ok) {
+          itemsById = new Map(lookup.items.map((i) => [i.id, i]));
+        }
+      }
+    }
+    for (const req of plan.heads.values()) {
+      if (options.requirementId !== undefined && req.id !== options.requirementId)
+        continue;
+      const ownResults = results.filter((r) => r.requirement === req.id && r.action === undefined);
+      const actResults = results.filter((r) => r.requirement === req.id && r.action !== undefined);
+      const totalClaims = req.claims.length + (req.actions ?? []).reduce((n, a) => n + (a.claims ?? []).length, 0);
+      if (totalClaims === 0) {
+        skipped.push({
+          planId: plan.id,
+          requirementId: req.id,
+          reason: "requirement has no claims to prove it"
+        });
+        continue;
+      }
+      const allHold = ownResults.length === req.claims.length && ownResults.every((r) => r.outcome === "holds") && (req.actions ?? []).every((act) => {
+        const actClaims = act.claims ?? [];
+        const actOwn = actResults.filter((r) => r.action === act.id);
+        return actOwn.length === actClaims.length && actOwn.every((r) => r.outcome === "holds");
+      });
+      if (!allHold) {
+        skipped.push({
+          planId: plan.id,
+          requirementId: req.id,
+          reason: "claims do not all hold"
+        });
+        continue;
+      }
+      const planRealized = plan.status === "realized";
+      const reqItems = requirementWorkItems(req).map((id) => itemsById.get(id));
+      const hasReqItems = reqItems.length > 0;
+      const allReqItemsClosed = hasReqItems && reqItems.every((i) => i?.state === "closed");
+      const actItems = (req.actions ?? []).flatMap((a) => (a.workItems ?? []).map((id) => itemsById.get(id)));
+      const hasActItems = actItems.length > 0;
+      const allActItemsClosed = !hasActItems || actItems.every((i) => i?.state === "closed");
+      const isRealized = planRealized || allReqItemsClosed && allActItemsClosed;
+      if (!isRealized) {
+        skipped.push({
+          planId: plan.id,
+          requirementId: req.id,
+          reason: "requirement or plan is not realized (work items open or plan not realized)"
+        });
+        continue;
+      }
+      const claimEvidences = [...ownResults, ...actResults].map((r) => r.evidence).filter(Boolean);
+      const evidenceStr = claimEvidences.join("; ");
+      const reqProposal = {
+        id: req.id,
+        kind: "rule",
+        source: plan.id,
+        text: `${req.title}
+
+${req.text}`.trim(),
+        evidence: evidenceStr !== "" ? evidenceStr : undefined,
+        author: options.actor,
+        note: `Realized requirement ${req.id} in ${plan.id} (${totalClaims} claims hold)`
+      };
+      proposedEntries.push({
+        planId: plan.id,
+        requirementId: req.id,
+        proposal: reqProposal
+      });
+      for (const act of req.actions ?? []) {
+        const actOwnResults = actResults.filter((r) => r.action === act.id);
+        const actEvidence = actOwnResults.map((r) => r.evidence).filter(Boolean).join("; ");
+        const actProposal = {
+          id: `${req.id}:${act.id}`,
+          kind: "rule",
+          source: plan.id,
+          text: act.text,
+          evidence: actEvidence !== "" ? actEvidence : undefined,
+          author: options.actor,
+          note: `Action item ${act.id} from realized requirement ${req.id} in ${plan.id}`
+        };
+        proposedEntries.push({
+          planId: plan.id,
+          requirementId: req.id,
+          actionId: act.id,
+          proposal: actProposal
+        });
+      }
+    }
+  }
+  if (options.dryRun || proposedEntries.length === 0) {
+    return {
+      proposed: proposedEntries,
+      skipped
+    };
+  }
+  const proposalList = proposedEntries.map((e) => e.proposal);
+  const results = await options.ruleSink.propose(proposalList);
+  const resultsById = new Map(results.map((r) => [r.id, r]));
+  const finalProposed = proposedEntries.map((e) => ({
+    ...e,
+    result: resultsById.get(e.proposal.id)
+  }));
+  return {
+    proposed: finalProposed,
+    skipped
+  };
+}
 // yojana/src/session.ts
 import { mkdirSync as mkdirSync4, writeFileSync as writeFileSync2 } from "fs";
 import { basename as basename2, join as join5, relative as relative2, sep as sep2 } from "path";
@@ -4680,10 +5690,10 @@ async function status(options) {
   return { plans, untracked, anomalies: openAnomalies(state) };
 }
 async function align(planId, heads, checks, worklink) {
-  const linked = heads.filter((r) => (r.workItems ?? []).length > 0);
+  const linked = heads.filter((r) => requirementWorkItems(r).length > 0 || (r.actions ?? []).some((a) => (a.claims ?? []).length > 0));
   if (checks === undefined || worklink === undefined || linked.length === 0)
     return [];
-  const ids = [...new Set(linked.flatMap((r) => r.workItems ?? []))];
+  const ids = [...new Set(linked.flatMap((r) => requirementWorkItems(r)))];
   const lookup = await worklink.get(ids);
   if (!lookup.ok)
     return [];
@@ -4691,16 +5701,51 @@ async function align(planId, heads, checks, worklink) {
   const results = checks.plans.find((p) => p.planId === planId)?.results ?? [];
   return linked.map((requirement) => {
     const items = (requirement.workItems ?? []).map((id) => byId.get(id) ?? { id, title: "", state: "missing" });
-    const own = results.filter((r) => r.requirement === requirement.id);
-    const count = (outcome) => own.filter((r) => r.outcome === outcome).length;
+    const own = results.filter((r) => r.requirement === requirement.id && r.action === undefined);
+    const driving = own.filter((r) => r.deterministic !== false);
+    const count = (outcome) => driving.filter((r) => r.outcome === outcome).length;
     const holds = count("holds");
     const violated = count("violated");
     const unverifiable = count("unverifiable");
-    const allHold = own.length > 0 && holds === own.length;
-    const allClosed = items.every((i) => i.state === "closed");
+    const allHold = driving.length > 0 && holds === driving.length;
+    const allClosed = items.length > 0 && items.every((i) => i.state === "closed");
     const someOpen = items.some((i) => i.state !== "closed" && i.state !== "missing");
     const mismatch = allHold && someOpen ? "claims-hold-work-open" : violated > 0 && allClosed ? "work-closed-claims-violated" : undefined;
-    return { requirement: requirement.id, items, holds, violated, unverifiable, mismatch };
+    const actions = requirement.actions?.map((act) => {
+      const actItems = (act.workItems ?? []).map((id) => byId.get(id) ?? { id, title: "", state: "missing" });
+      const actResults = results.filter((r) => r.requirement === requirement.id && r.action === act.id);
+      const actDriving = actResults.filter((r) => r.deterministic !== false);
+      const actCount = (outcome) => actDriving.filter((r) => r.outcome === outcome).length;
+      const actHolds = actCount("holds");
+      const actViolated = actCount("violated");
+      const actUnverifiable = actCount("unverifiable");
+      const actAllHold = actDriving.length > 0 && actHolds === actDriving.length;
+      const actAllClosed = actItems.length > 0 && actItems.every((i) => i.state === "closed");
+      const actSomeOpen = actItems.some((i) => i.state !== "closed" && i.state !== "missing");
+      const actMismatch = actAllHold && actSomeOpen ? "claims-hold-work-open" : actViolated > 0 && actAllClosed ? "work-closed-claims-violated" : undefined;
+      const hasItems = actItems.length > 0;
+      const hasClaims = actDriving.length > 0;
+      const done = (hasItems || hasClaims) && (!hasItems || actAllClosed) && (!hasClaims || actAllHold);
+      return {
+        action: act.id,
+        text: act.text,
+        items: actItems,
+        holds: actHolds,
+        violated: actViolated,
+        unverifiable: actUnverifiable,
+        done,
+        mismatch: actMismatch
+      };
+    });
+    return {
+      requirement: requirement.id,
+      items,
+      holds,
+      violated,
+      unverifiable,
+      mismatch,
+      ...actions === undefined ? {} : { actions }
+    };
   });
 }
 
@@ -5033,7 +6078,7 @@ review/
 }
 
 // yojana/src/session.ts
-var REVIEW_TEMPLATE = "review-document";
+var REVIEW_TEMPLATE = "plan-review";
 var STALE_DAYS = 14;
 var refuse2 = (code, message, current) => current === undefined ? { ok: false, code, message } : { ok: false, code, message, current };
 var PAGE = { ok: true, update: { kind: "page" } };
@@ -5358,6 +6403,77 @@ function reviewSession(options) {
     }, false)
   };
 }
+// yojana/src/sync-actions.ts
+async function syncActions(options) {
+  const { parser, worklink, files, writePlan, dryRun = false } = options;
+  const syncedFiles = [];
+  for (const file of files) {
+    const parsed = parser.parse(file.source, file.text);
+    if (!parsed.ok)
+      continue;
+    if (options.planId !== undefined && parsed.plan.id !== options.planId)
+      continue;
+    const unlinked = [];
+    for (const req of parsed.plan.requirements) {
+      for (const act of req.actions ?? []) {
+        if ((act.workItems ?? []).length === 0) {
+          const parent = (req.workItems ?? [])[0] ?? (parsed.plan.workItems ?? [])[0];
+          unlinked.push({ reqId: req.id, actId: act.id, title: act.text, parent });
+        }
+      }
+    }
+    if (unlinked.length === 0)
+      continue;
+    if (worklink.create === undefined) {
+      throw new YojanaError("WORKLINK_READONLY", `${worklink.name} does not support creating items`);
+    }
+    const actions = [];
+    let updatedText = file.text;
+    for (const item of unlinked) {
+      if (dryRun) {
+        actions.push({
+          requirement: item.reqId,
+          action: item.actId,
+          title: item.title,
+          bead: "(dry-run)",
+          parent: item.parent
+        });
+        continue;
+      }
+      const created = await worklink.create({
+        title: item.title,
+        parent: item.parent
+      });
+      if (!created.ok) {
+        throw new YojanaError("WORKLINK_ERROR", created.error);
+      }
+      actions.push({
+        requirement: item.reqId,
+        action: item.actId,
+        title: item.title,
+        bead: created.id,
+        parent: item.parent
+      });
+      const escaped = item.actId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const pattern = new RegExp(`(\\{#${escaped})\\s*\\}`);
+      if (pattern.test(updatedText)) {
+        updatedText = updatedText.replace(pattern, `$1 bead=${created.id}}`);
+      } else {
+        const alt = new RegExp(`(\\{#${escaped}\\b)`);
+        updatedText = updatedText.replace(alt, `$1 bead=${created.id}`);
+      }
+    }
+    if (!dryRun && actions.length > 0) {
+      writePlan?.(file.source, updatedText);
+    }
+    syncedFiles.push({
+      source: file.source,
+      planId: parsed.plan.id,
+      actions
+    });
+  }
+  return { files: syncedFiles, dryRun };
+}
 
 // yojana/src/index.ts
 var VERSION = "0.1.0";
@@ -5400,7 +6516,10 @@ function parseOutput(result) {
     return { ok: false, why: `anvesa did not answer in JSON (exit ${result.exitCode}): ${text}` };
   }
   if (typeof value !== "object" || value === null) {
-    return { ok: false, why: "anvesa answered with something other than an object" };
+    return { ok: false, why: "anvesa answered with something other than an object or array" };
+  }
+  if (Array.isArray(value)) {
+    return { ok: true, value };
   }
   const record = value;
   const error = record.error;
@@ -5413,19 +6532,163 @@ function parseOutput(result) {
 
 class AnvesaVerifier {
   name = "anvesa";
-  kinds = ["wql", "dependents"];
+  kinds = [
+    "anvesa.wql",
+    "wql",
+    "anvesa.dependents",
+    "dependents",
+    "anvesa.callers",
+    "anvesa.callees",
+    "anvesa.routes"
+  ];
   #run;
   constructor(run) {
     this.#run = run;
   }
+  describe() {
+    return {
+      name: "anvesa",
+      version: "1.0.0",
+      kinds: [
+        {
+          kind: "anvesa.wql",
+          description: "Syntactic queries over AST",
+          expression: true,
+          params: {
+            query: { type: "string", required: false, description: "WQL query expression" },
+            within: { type: "string", required: false, description: "Folder scope filter" }
+          },
+          deterministic: true,
+          version: "1.0.0"
+        },
+        {
+          kind: "wql",
+          description: "Syntactic queries over AST (alias for anvesa.wql)",
+          expression: true,
+          params: {
+            query: { type: "string", required: false, description: "WQL query expression" },
+            within: { type: "string", required: false, description: "Folder scope filter" }
+          },
+          deterministic: true,
+          version: "1.0.0"
+        },
+        {
+          kind: "anvesa.dependents",
+          description: "Dependency graph import checks",
+          expression: true,
+          params: {
+            target: { type: "string", required: false, description: "Target file path" },
+            from: { type: "string", required: false, description: "Importer folder scope filter" }
+          },
+          deterministic: true,
+          version: "1.0.0"
+        },
+        {
+          kind: "dependents",
+          description: "Dependency graph import checks (alias for anvesa.dependents)",
+          expression: true,
+          params: {
+            target: { type: "string", required: false, description: "Target file path" },
+            from: { type: "string", required: false, description: "Importer folder scope filter" }
+          },
+          deterministic: true,
+          version: "1.0.0"
+        },
+        {
+          kind: "anvesa.callers",
+          description: "Trace callers of a symbol or location",
+          expression: true,
+          params: {
+            symbol: {
+              type: "string",
+              required: false,
+              description: "Target symbol name or path:line"
+            },
+            target: {
+              type: "string",
+              required: false,
+              description: "Target symbol name or path:line"
+            },
+            resolvedOnly: {
+              type: "boolean",
+              required: false,
+              description: "Include only resolved call edges"
+            }
+          },
+          deterministic: true,
+          version: "1.0.0"
+        },
+        {
+          kind: "anvesa.callees",
+          description: "Trace callees invoked by a symbol or location",
+          expression: true,
+          params: {
+            symbol: {
+              type: "string",
+              required: false,
+              description: "Target symbol name or path:line"
+            },
+            target: {
+              type: "string",
+              required: false,
+              description: "Target symbol name or path:line"
+            }
+          },
+          deterministic: true,
+          version: "1.0.0"
+        },
+        {
+          kind: "anvesa.routes",
+          description: "Discovered HTTP endpoint routes",
+          expression: true,
+          params: {
+            method: {
+              type: "string",
+              required: false,
+              description: "HTTP method filter (GET, POST, etc.)"
+            },
+            path: {
+              type: "string",
+              required: false,
+              description: "Route path template filter"
+            },
+            framework: {
+              type: "string",
+              required: false,
+              description: "Framework filter"
+            }
+          },
+          deterministic: true,
+          version: "1.0.0"
+        }
+      ]
+    };
+  }
+  async indexState() {
+    try {
+      const output = await this.#run(["status"]);
+      const parsed = parseOutput(output);
+      if (parsed.ok && !Array.isArray(parsed.value)) {
+        const obj = parsed.value;
+        const idx = obj.index;
+        if (idx !== undefined) {
+          return `${String(idx.symbols ?? "")}:${String(idx.calls ?? "")}:${String(idx.files ?? "")}`;
+        }
+      }
+    } catch {
+      return;
+    }
+    return;
+  }
   async verify(requirement, claim) {
-    const result = (outcome, evidence) => ({
+    const result = (outcome, evidence, measurements) => ({
       requirement,
       claim,
       outcome,
-      evidence
+      evidence,
+      measurements,
+      deterministic: true
     });
-    const judge = (found, evidence) => result(found === claim.expect ? "holds" : "violated", evidence);
     let output;
     try {
       output = await this.#run(this.#args(claim));
@@ -5435,37 +6698,120 @@ class AnvesaVerifier {
     const parsed = parseOutput(output);
     if (!parsed.ok)
       return result("unverifiable", parsed.why);
-    if (claim.kind === "wql") {
-      const { within } = splitWql(claim.expression);
-      const items = (Array.isArray(parsed.value.items) ? parsed.value.items : []).map((item) => item);
+    if (claim.kind === "wql" || claim.kind === "anvesa.wql") {
+      const split = splitWql(claim.expression ?? "");
+      const within = claim.params?.within ?? split.within;
+      const rec = !Array.isArray(parsed.value) ? parsed.value : {};
+      const items = (Array.isArray(rec.items) ? rec.items : []).map((item) => item);
       const places = items.filter((i) => within === undefined || String(i.path).startsWith(within)).map((i) => `${String(i.path)}:${String(i.startLine)}`);
       const scope = within === undefined ? "" : ` in ${within}`;
       const overall = within === undefined ? "" : ` (${items.length} ${items.length === 1 ? "match" : "matches"} in all)`;
-      return judge(places.length > 0, places.length > 0 ? `matches${scope} ${listed(places)}${overall}` : `no match${scope}${overall}`);
+      const count = places.length;
+      const evidence = count > 0 ? `matches${scope} ${listed(places)}${overall}` : `no match${scope}${overall}`;
+      const measurements = { count, matches: places };
+      const outcome = evaluatePredicate(claim.expect, measurements) ? "holds" : "violated";
+      return result(outcome, evidence, measurements);
     }
-    const { from } = splitDependents(claim.expression);
-    const all = Array.isArray(parsed.value.dependents) ? parsed.value.dependents : [];
-    const paths = all.map((d) => String(d.path)).filter((path) => from === undefined || path.startsWith(from));
-    const scope = from === undefined ? "" : ` under ${from}`;
-    const overall = from === undefined ? "" : ` (${all.length} ${all.length === 1 ? "file imports" : "files import"} it in all)`;
-    const count = `${paths.length} ${paths.length === 1 ? "file" : "files"}`;
-    return judge(paths.length > 0, paths.length > 0 ? `imported${scope} by ${listed(paths)} (${count})${overall}` : `nothing${scope} imports it${overall}`);
+    if (claim.kind === "dependents" || claim.kind === "anvesa.dependents") {
+      const split = splitDependents(claim.expression ?? "");
+      const from = claim.params?.from ?? split.from;
+      const rec = !Array.isArray(parsed.value) ? parsed.value : {};
+      const all = Array.isArray(rec.dependents) ? rec.dependents : [];
+      const paths = all.map((d) => String(d.path)).filter((path) => from === undefined || path.startsWith(from));
+      const scope = from === undefined ? "" : ` under ${from}`;
+      const overall = from === undefined ? "" : ` (${all.length} ${all.length === 1 ? "file imports" : "files import"} it in all)`;
+      const count = paths.length;
+      const countDesc = `${count} ${count === 1 ? "file" : "files"}`;
+      const evidence = count > 0 ? `imported${scope} by ${listed(paths)} (${countDesc})${overall}` : `nothing${scope} imports it${overall}`;
+      const measurements = { count, matches: paths };
+      const outcome = evaluatePredicate(claim.expect, measurements) ? "holds" : "violated";
+      return result(outcome, evidence, measurements);
+    }
+    if (claim.kind === "anvesa.callers") {
+      const rec = !Array.isArray(parsed.value) ? parsed.value : {};
+      const callersObj = rec.callers;
+      const items = Array.isArray(callersObj?.items) ? callersObj.items : [];
+      const count = items.length;
+      const callerNames = items.map((c) => String(c.from ?? `${c.path}:${c.line}`));
+      const sym = rec.symbol;
+      const symName = sym?.name ? String(sym.name) : String(claim.params?.symbol ?? claim.params?.target ?? claim.expression ?? "symbol");
+      const evidence = count === 0 ? `no callers for ${symName}` : `called by ${listed(callerNames)} (${count} ${count === 1 ? "caller" : "callers"})`;
+      const measurements = { count, callers: callerNames };
+      const outcome = evaluatePredicate(claim.expect, measurements) ? "holds" : "violated";
+      return result(outcome, evidence, measurements);
+    }
+    if (claim.kind === "anvesa.callees") {
+      const rec = !Array.isArray(parsed.value) ? parsed.value : {};
+      const calleesObj = rec.callees;
+      const items = Array.isArray(calleesObj?.items) ? calleesObj.items : [];
+      const count = items.length;
+      const calleeNames = items.map((c) => String(c.to ?? `${c.path}:${c.line}`));
+      const sym = rec.symbol;
+      const symName = sym?.name ? String(sym.name) : String(claim.params?.symbol ?? claim.params?.target ?? claim.expression ?? "symbol");
+      const evidence = count === 0 ? `no callees for ${symName}` : `calls ${listed(calleeNames)} (${count} ${count === 1 ? "callee" : "callees"})`;
+      const measurements = { count, callees: calleeNames };
+      const outcome = evaluatePredicate(claim.expect, measurements) ? "holds" : "violated";
+      return result(outcome, evidence, measurements);
+    }
+    if (claim.kind === "anvesa.routes") {
+      const rec = !Array.isArray(parsed.value) ? parsed.value : {};
+      const items = Array.isArray(parsed.value) ? parsed.value : Array.isArray(rec.items) ? rec.items : [];
+      const count = items.length;
+      const routeDescs = items.map((r) => `${String(r.method ?? "")} ${String(r.route ?? r.path ?? "")}`.trim());
+      const evidence = count === 0 ? "no matching routes" : `routes: ${listed(routeDescs)} (${count} ${count === 1 ? "route" : "routes"})`;
+      const measurements = { count, routes: routeDescs };
+      const outcome = evaluatePredicate(claim.expect, measurements) ? "holds" : "violated";
+      return result(outcome, evidence, measurements);
+    }
+    return result("unverifiable", `unsupported anvesa claim kind "${claim.kind}"`);
   }
   #args(claim) {
-    if (claim.kind === "wql") {
-      const { query, within } = splitWql(claim.expression);
+    if (claim.kind === "wql" || claim.kind === "anvesa.wql") {
+      const split = splitWql(claim.expression ?? "");
+      const query = claim.params?.query ?? split.query;
+      const within = claim.params?.within ?? split.within;
       const limit = within === undefined ? 1 : Number.MAX_SAFE_INTEGER;
       return ["query", query, "--limit", String(limit)];
     }
-    const { target } = splitDependents(claim.expression);
-    return [
-      "dependents",
-      target,
-      "--depth",
-      String(Number.MAX_SAFE_INTEGER),
-      "--limit",
-      String(Number.MAX_SAFE_INTEGER)
-    ];
+    if (claim.kind === "dependents" || claim.kind === "anvesa.dependents") {
+      const split = splitDependents(claim.expression ?? "");
+      const target = claim.params?.target ?? claim.params?.path ?? split.target;
+      return [
+        "dependents",
+        target,
+        "--depth",
+        String(Number.MAX_SAFE_INTEGER),
+        "--limit",
+        String(Number.MAX_SAFE_INTEGER)
+      ];
+    }
+    if (claim.kind === "anvesa.callers") {
+      const target = claim.params?.symbol ?? claim.params?.target ?? claim.expression?.trim() ?? "";
+      const args = ["callers", target, "--limit", String(Number.MAX_SAFE_INTEGER)];
+      if (claim.params?.resolvedOnly === true) {
+        args.push("--resolved-only");
+      }
+      return args;
+    }
+    if (claim.kind === "anvesa.callees") {
+      const target = claim.params?.symbol ?? claim.params?.target ?? claim.expression?.trim() ?? "";
+      return ["callees", target, "--limit", String(Number.MAX_SAFE_INTEGER)];
+    }
+    if (claim.kind === "anvesa.routes") {
+      const parsedExpr = splitRoutes(claim.expression ?? "");
+      const method = claim.params?.method ?? parsedExpr.method;
+      const path = claim.params?.path ?? parsedExpr.path;
+      const framework = claim.params?.framework;
+      const args = ["routes"];
+      if (method !== undefined)
+        args.push(method);
+      if (path !== undefined)
+        args.push(path);
+      if (framework !== undefined)
+        args.push("--framework", framework);
+      return args;
+    }
+    return [claim.kind, claim.expression ?? ""];
   }
 }
 function splitWql(expression) {
@@ -5480,6 +6826,426 @@ function splitDependents(expression) {
     return { target: expression.trim(), from: undefined };
   return { target: (match[1] ?? "").trim(), from: match[2] };
 }
+function splitRoutes(expression) {
+  const trimmed = expression.trim();
+  if (trimmed === "")
+    return { method: undefined, path: undefined };
+  const parts = trimmed.split(/\s+/);
+  const first = parts[0];
+  if (first !== undefined && parts.length >= 2) {
+    const isMethod = /^(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD|ANY)$/i.test(first);
+    if (isMethod) {
+      return { method: first.toUpperCase(), path: parts.slice(1).join(" ") };
+    }
+    return { method: undefined, path: trimmed };
+  }
+  if (/^(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD|ANY)$/i.test(trimmed)) {
+    return { method: trimmed.toUpperCase(), path: undefined };
+  }
+  return { method: undefined, path: trimmed };
+}
+// yojana-verify/src/external.ts
+function spawnExternal(options) {
+  return async (action, payload) => {
+    const input = JSON.stringify(payload);
+    const cmdArgs = [...options.args ?? [], action];
+    const spawnOpts = {
+      env: { ...process.env, ...options.env ?? {} },
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe"
+    };
+    if (options.cwd !== undefined) {
+      spawnOpts.cwd = options.cwd;
+    }
+    const child = Bun.spawn([options.command, ...cmdArgs], spawnOpts);
+    if (child.stdin) {
+      await child.stdin.write(input);
+      await child.stdin.end();
+    }
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited
+    ]);
+    return { exitCode, stdout, stderr };
+  };
+}
+
+class ExternalVerifier {
+  name;
+  #kinds;
+  #descriptor;
+  #run;
+  constructor(options, run) {
+    this.name = options.name;
+    this.#kinds = options.kinds ? [...options.kinds] : [];
+    this.#run = run ?? spawnExternal(options);
+  }
+  get kinds() {
+    return this.#kinds;
+  }
+  async describe() {
+    if (this.#descriptor !== undefined) {
+      return this.#descriptor;
+    }
+    let output;
+    try {
+      output = await this.#run("describe", { action: "describe" });
+    } catch {
+      return {
+        name: this.name,
+        kinds: this.#kinds.map((k) => ({
+          kind: k,
+          expression: true,
+          deterministic: true
+        }))
+      };
+    }
+    if (output.exitCode !== 0) {
+      return {
+        name: this.name,
+        kinds: this.#kinds.map((k) => ({
+          kind: k,
+          expression: true,
+          deterministic: true
+        }))
+      };
+    }
+    try {
+      const parsed = JSON.parse(output.stdout);
+      const kinds = Array.isArray(parsed.kinds) ? parsed.kinds : [];
+      this.#descriptor = {
+        name: typeof parsed.name === "string" ? parsed.name : this.name,
+        version: typeof parsed.version === "string" ? parsed.version : undefined,
+        kinds
+      };
+      this.#kinds = kinds.map((k) => k.kind);
+      return this.#descriptor;
+    } catch {
+      return {
+        name: this.name,
+        kinds: this.#kinds.map((k) => ({
+          kind: k,
+          expression: true,
+          deterministic: true
+        }))
+      };
+    }
+  }
+  async indexState() {
+    try {
+      const output = await this.#run("indexState", { action: "indexState" });
+      if (output.exitCode !== 0)
+        return;
+      const parsed = JSON.parse(output.stdout);
+      if (typeof parsed === "string")
+        return parsed;
+      if (parsed !== null && typeof parsed === "object" && typeof parsed.indexState === "string") {
+        return parsed.indexState;
+      }
+      return;
+    } catch {
+      return;
+    }
+  }
+  async verify(requirement, claim) {
+    let output;
+    try {
+      output = await this.#run("verify", {
+        action: "verify",
+        requirement,
+        claim
+      });
+    } catch (err) {
+      return {
+        requirement,
+        claim,
+        outcome: "unverifiable",
+        evidence: `could not run external verifier "${this.name}": ${err.message}`
+      };
+    }
+    if (output.exitCode !== 0) {
+      const text = (output.stderr || output.stdout).trim();
+      return {
+        requirement,
+        claim,
+        outcome: "unverifiable",
+        evidence: `external verifier "${this.name}" failed (exit ${output.exitCode}): ${text}`
+      };
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(output.stdout);
+    } catch {
+      const text = output.stdout.trim();
+      return {
+        requirement,
+        claim,
+        outcome: "unverifiable",
+        evidence: `external verifier "${this.name}" did not answer in JSON: ${text}`
+      };
+    }
+    const measurements = parsed.measurements !== null && typeof parsed.measurements === "object" ? parsed.measurements : undefined;
+    let outcome = parsed.outcome === "holds" || parsed.outcome === "violated" || parsed.outcome === "unverifiable" ? parsed.outcome : "holds";
+    if (measurements !== undefined) {
+      outcome = evaluateClaimOutcome(claim, { outcome, measurements });
+    }
+    const evidence = typeof parsed.evidence === "string" ? parsed.evidence : "";
+    const descKind = this.#descriptor?.kinds.find((k) => k.kind === claim.kind);
+    const deterministic = typeof parsed.deterministic === "boolean" ? parsed.deterministic : descKind?.deterministic ?? true;
+    const measuredAt = typeof parsed.measuredAt === "number" ? parsed.measuredAt : deterministic ? undefined : Date.now();
+    return {
+      requirement,
+      claim,
+      outcome,
+      evidence,
+      measurements,
+      deterministic,
+      ...measuredAt !== undefined ? { measuredAt } : {}
+    };
+  }
+}
+// yojana-verify/src/medha.ts
+function spawnMedha(bin, root) {
+  return async (args) => {
+    const child = Bun.spawn([bin, ...args, "--dir", root, "--json"], {
+      cwd: root,
+      stdout: "pipe",
+      stderr: "pipe"
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited
+    ]);
+    return { exitCode, stdout, stderr };
+  };
+}
+function parseJson2(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return;
+  }
+}
+function parseOutput2(result) {
+  const value = parseJson2(result.stdout) ?? parseJson2(result.stderr);
+  if (value === undefined) {
+    const text = (result.stderr || result.stdout).trim();
+    return { ok: false, why: `medha did not answer in JSON (exit ${result.exitCode}): ${text}` };
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, why: "medha answered with something other than an object" };
+  }
+  const record = value;
+  const error = record.error;
+  if (error !== undefined) {
+    const hint = typeof error.hint === "string" ? ` (${error.hint})` : "";
+    return { ok: false, why: `${String(error.code)}: ${String(error.message)}${hint}` };
+  }
+  return { ok: true, value: record };
+}
+function parseEntityKey(expression, params) {
+  const entityStr = params?.entity ?? params?.id ?? expression?.trim();
+  const namespace = params?.namespace;
+  const explicitKind = params?.kind;
+  if (!entityStr) {
+    return { kind: explicitKind ?? "rule", id: "", namespace };
+  }
+  const slashIdx = entityStr.indexOf("/");
+  if (slashIdx >= 0) {
+    const kind = explicitKind ?? entityStr.slice(0, slashIdx);
+    const id = entityStr.slice(slashIdx + 1);
+    return { kind, id, namespace };
+  }
+  return { kind: explicitKind ?? "rule", id: entityStr, namespace };
+}
+
+class MedhaVerifier {
+  name = "medha";
+  kinds = ["medha.entity"];
+  #run;
+  constructor(run) {
+    this.#run = run;
+  }
+  describe() {
+    return {
+      name: "medha",
+      version: "1.0.0",
+      kinds: [
+        {
+          kind: "medha.entity",
+          description: "Entity trust, lifecycle status, and drift",
+          expression: true,
+          params: {
+            entity: {
+              type: "string",
+              required: false,
+              description: "Entity identifier in form kind/id or id"
+            },
+            kind: {
+              type: "string",
+              required: false,
+              description: "Entity kind (rule, recipe, tool). Default: rule"
+            },
+            id: {
+              type: "string",
+              required: false,
+              description: "Entity id"
+            },
+            namespace: {
+              type: "string",
+              required: false,
+              description: "Entity namespace"
+            }
+          },
+          deterministic: false,
+          version: "1.0.0"
+        }
+      ]
+    };
+  }
+  async verify(requirement, claim) {
+    const { kind, id, namespace } = parseEntityKey(claim.expression, claim.params);
+    const entityLabel = namespace ? `${namespace}:${kind}/${id}` : `${kind}/${id}`;
+    let output;
+    try {
+      output = await this.#run(this.#args(claim));
+    } catch (error) {
+      return {
+        requirement,
+        claim,
+        outcome: "unverifiable",
+        evidence: `could not run medha (${String(error)}); install it or set MEDHA_BIN`,
+        deterministic: false,
+        measuredAt: Date.now()
+      };
+    }
+    const parsed = parseOutput2(output);
+    if (!parsed.ok) {
+      return {
+        requirement,
+        claim,
+        outcome: "unverifiable",
+        evidence: parsed.why,
+        deterministic: false,
+        measuredAt: Date.now()
+      };
+    }
+    const rec = parsed.value;
+    const detail = rec.detail ?? {};
+    const hint = detail.hint ?? {};
+    const temporal = hint.temporal ?? {};
+    const status = String(hint.status ?? "probation");
+    const trust = typeof hint.trustScore === "number" ? hint.trustScore : 0;
+    const isDrifting = temporal.isDrifting === true;
+    const driftDelta = typeof temporal.driftDelta === "number" ? temporal.driftDelta : 0;
+    const driftDirection = typeof temporal.driftDirection === "string" ? temporal.driftDirection : undefined;
+    const known = detail.known !== false;
+    let evidence = `${entityLabel} status is ${status}, trust is ${trust}`;
+    if (isDrifting && driftDirection !== undefined) {
+      evidence += `, drifting (${driftDirection})`;
+    }
+    if (!known) {
+      evidence += " (unknown entity, probation prior)";
+    }
+    const measurements = {
+      status,
+      trust,
+      trustScore: trust,
+      drift: isDrifting,
+      driftDelta,
+      ...driftDirection !== undefined ? { driftDirection } : {},
+      known,
+      found: known,
+      count: known ? 1 : 0
+    };
+    const outcome = evaluatePredicate(claim.expect, measurements) ? "holds" : "violated";
+    const measuredAt = typeof rec.asOf === "number" ? rec.asOf : Date.now();
+    return {
+      requirement,
+      claim,
+      outcome,
+      evidence,
+      measurements,
+      deterministic: false,
+      measuredAt
+    };
+  }
+  #args(claim) {
+    const { kind, id, namespace } = parseEntityKey(claim.expression, claim.params);
+    const args = ["show", "--id", id, "--kind", kind];
+    if (namespace !== undefined && namespace !== "") {
+      args.push("--namespace", namespace);
+    }
+    return args;
+  }
+}
+
+class MedhaRuleSink {
+  name = "medha";
+  #runner;
+  #namespace;
+  constructor(runner, options) {
+    this.#runner = runner;
+    this.#namespace = options?.namespace;
+  }
+  async propose(proposals) {
+    const results = [];
+    for (const proposal of proposals) {
+      const args = ["propose", "--kind", proposal.kind ?? "rule", "--id", proposal.id];
+      const ns = proposal.namespace ?? this.#namespace;
+      if (ns !== undefined && ns !== "") {
+        args.push("--namespace", ns);
+      }
+      if (proposal.source) {
+        args.push("--source", proposal.source);
+      }
+      if (proposal.text) {
+        args.push("--text", proposal.text);
+      }
+      if (proposal.evidence) {
+        args.push("--evidence", proposal.evidence);
+      }
+      if (proposal.author) {
+        args.push("--author", proposal.author);
+      }
+      if (proposal.note) {
+        args.push("--note", proposal.note);
+      }
+      if (proposal.at !== undefined) {
+        args.push("--at", String(proposal.at));
+      }
+      try {
+        const runResult = await this.#runner(args);
+        if (runResult.exitCode !== 0) {
+          const parsed = parseOutput2(runResult);
+          const errorMsg = parsed.ok ? JSON.stringify(parsed.value) : parsed.why;
+          results.push({
+            id: proposal.id,
+            ok: false,
+            error: errorMsg
+          });
+        } else {
+          const parsed = parseOutput2(runResult);
+          results.push({
+            id: proposal.id,
+            ok: true,
+            ...parsed.ok ? { entity: parsed.value } : {}
+          });
+        }
+      } catch (error) {
+        results.push({
+          id: proposal.id,
+          ok: false,
+          error: error.message
+        });
+      }
+    }
+    return results;
+  }
+}
 // yojana-verify/src/path.ts
 import { existsSync as existsSync5 } from "fs";
 import { join as join6 } from "path";
@@ -5490,16 +7256,49 @@ class PathVerifier {
   constructor(root) {
     this.#root = root;
   }
+  describe() {
+    return {
+      name: "path",
+      version: "1.0.0",
+      kinds: [
+        {
+          kind: "path",
+          description: "Checks if a path or glob matches on filesystem",
+          expression: true,
+          params: {
+            path: { type: "string", required: false, description: "File path to check" },
+            glob: {
+              type: "string",
+              required: false,
+              description: "Glob pattern to check"
+            }
+          },
+          deterministic: true,
+          version: "1.0.0"
+        }
+      ]
+    };
+  }
   async verify(requirement, claim) {
-    const pattern = claim.expression.trim();
+    const pattern = (claim.expression ?? claim.params?.path ?? claim.params?.glob ?? "").trim();
+    if (pattern === "") {
+      return {
+        requirement,
+        claim,
+        outcome: "unverifiable",
+        evidence: "claim needs an expression, path, or glob parameter"
+      };
+    }
     const isGlob = /[*?[{]/.test(pattern);
     const matches = isGlob ? Array.from(new Bun.Glob(pattern).scanSync({ cwd: this.#root, dot: true })) : existsSync5(join6(this.#root, pattern)) ? [pattern] : [];
-    const found = matches.length > 0;
+    const measurements = { count: matches.length, matches };
+    const outcome = evaluateClaimOutcome(claim, { outcome: "holds", measurements });
     return {
       requirement,
       claim,
-      outcome: found === claim.expect ? "holds" : "violated",
-      evidence: found ? `${matches.length} ${matches.length === 1 ? "match" : "matches"}: ${listed(matches.sort())}` : `${pattern} does not exist`
+      outcome,
+      measurements,
+      evidence: matches.length > 0 ? `${matches.length} ${matches.length === 1 ? "match" : "matches"}: ${listed(matches.sort())}` : `${pattern} does not exist`
     };
   }
 }
@@ -5513,6 +7312,30 @@ class TextVerifier {
   constructor(root) {
     this.#root = root;
   }
+  describe() {
+    return {
+      name: "text",
+      version: "1.0.0",
+      kinds: [
+        {
+          kind: "text",
+          description: "Checks if a pattern appears in matching files",
+          expression: true,
+          params: {
+            pattern: { type: "string", required: false, description: "Regex pattern" },
+            in: { type: "string", required: false, description: "Path or glob to search" },
+            expression: {
+              type: "string",
+              required: false,
+              description: "<pattern> in <glob>"
+            }
+          },
+          deterministic: true,
+          version: "1.0.0"
+        }
+      ]
+    };
+  }
   async verify(requirement, claim) {
     const result = (outcome, evidence) => ({
       requirement,
@@ -5520,7 +7343,8 @@ class TextVerifier {
       outcome,
       evidence
     });
-    const split = /^(.+)\s+in\s+(\S+)$/.exec(claim.expression.trim());
+    const expr = (claim.expression ?? claim.params?.expression ?? (claim.params?.pattern && claim.params?.in ? `${claim.params.pattern} in ${claim.params.in}` : "")).trim();
+    const split = /^(.+)\s+in\s+(\S+)$/.exec(expr);
     if (split === null) {
       return result("unverifiable", "write the claim as `<pattern> in <path or glob>`");
     }
@@ -5544,8 +7368,15 @@ class TextVerifier {
       });
     }
     const searched = `${files.length} ${files.length === 1 ? "file" : "files"} searched`;
-    const found = hits.length > 0;
-    return result(found === claim.expect ? "holds" : "violated", found ? `found at ${listed(hits)} (${hits.length} ${hits.length === 1 ? "line" : "lines"}, ${searched})` : `not found (${searched})`);
+    const measurements = { count: hits.length, matches: hits };
+    const outcome = evaluateClaimOutcome(claim, { outcome: "holds", measurements });
+    return {
+      requirement,
+      claim,
+      outcome,
+      measurements,
+      evidence: hits.length > 0 ? `found at ${listed(hits)} (${hits.length} ${hits.length === 1 ? "line" : "lines"}, ${searched})` : `not found (${searched})`
+    };
   }
   #files(where) {
     if (/[*?[{]/.test(where)) {
@@ -5636,6 +7467,25 @@ class BdWorkLink {
   reopen(id, reason) {
     return this.#change(["reopen", id, "--reason", reason]);
   }
+  async create(options) {
+    const args = ["create", options.title, "--json"];
+    if (options.parent !== undefined)
+      args.push("--parent", options.parent);
+    if (options.description !== undefined)
+      args.push("--description", options.description);
+    const answer = await this.#call(args);
+    if (!answer.ok)
+      return answer;
+    const raw = answer.value;
+    const id = raw?.id;
+    if (typeof id !== "string" || id === "") {
+      return {
+        ok: false,
+        error: `bd create answered without an id: ${JSON.stringify(answer.value)}`
+      };
+    }
+    return { ok: true, id };
+  }
   async#change(args) {
     let result;
     try {
@@ -5703,7 +7553,8 @@ plan still matches the code.
 - **Work items.** Never close or reopen a bead yourself because a plan says the work is done.
   Propose it with \`yojana decide\` (without \`--final\`). The person finalizes it on the review page
   or with \`yojana decisions --finalize\`. Only then does \`yojana decisions --apply\` run \`bd close\`.
-  Do not pass \`--final\` or run \`--apply\` unless the person asks in this conversation.
+  Do not pass \`--final\` or run \`--apply\` unless the person asks in this conversation. For actions
+  without beads, propose that the person runs \`yojana actions sync [plan]\`; never run it unprompted.
 - **The log.** Never edit \`.yojana/\` by hand. It is written only by \`yojana\`.
 
 ## A plan file
@@ -5765,6 +7616,7 @@ expect: false
 | propose a decision on a bead | \`yojana decide <plan> <req> <bead> close\\|reopen --reason "\u2026"\` |
 | propose moving a plan (draft \u2192 accepted, \u2026) | \`yojana propose-status <plan> <status> --reason "\u2026"\` |
 | what waits on the person (bead decisions, status proposals) | \`yojana decisions [--all]\` |
+| create beads for unlinked actions | \`yojana actions sync [plan] [--dry-run]\` |
 | bring log edits back into plan files | \`yojana refresh\` |
 | start a plan from an existing roadmap | \`yojana import <file> --id plan/<name>\` |
 | review page in the browser | \`/yojana:review\` (Claude Code) or \`/yojana-review\` (opencode) |
@@ -5852,7 +7704,8 @@ var EMPTY = {
   found: false,
   vars: {},
   home: undefined,
-  theme: { css: undefined, fonts: {}, tokens: {}, dark: {} }
+  theme: { css: undefined, fonts: {}, tokens: {}, dark: {} },
+  verifiers: []
 };
 var TOKEN_NAME = /^[a-z][a-z0-9-]*$/;
 var VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -5870,7 +7723,7 @@ function loadConfig(env = process.env) {
   } catch (cause) {
     throw invalid2(path, `is not JSON: ${cause.message}`);
   }
-  const top = record(path, raw, "the file", ["vars", "home", "theme"]);
+  const top = record(path, raw, "the file", ["vars", "home", "theme", "verifiers", "adapters"]);
   const vars = {};
   for (const [name, value] of Object.entries(record(path, top.vars ?? {}, "vars"))) {
     if (!VAR_NAME.test(name))
@@ -5886,6 +7739,40 @@ function loadConfig(env = process.env) {
   for (const [role, value] of Object.entries(record(path, theme.fonts ?? {}, "theme.fonts", FONT_ROLES))) {
     fonts[role] = cssValue(path, value, `theme.fonts.${role}`);
   }
+  if (top.verifiers !== undefined && !Array.isArray(top.verifiers)) {
+    throw invalid2(path, "verifiers must be an array");
+  }
+  if (top.adapters !== undefined && !Array.isArray(top.adapters)) {
+    throw invalid2(path, "adapters must be an array");
+  }
+  const verifiersRaw = [
+    ...Array.isArray(top.verifiers) ? top.verifiers : [],
+    ...Array.isArray(top.adapters) ? top.adapters : []
+  ];
+  const verifiers = [];
+  for (let i = 0;i < verifiersRaw.length; i++) {
+    const entry = record(path, verifiersRaw[i], `verifiers[${i}]`, [
+      "name",
+      "command",
+      "args",
+      "kinds",
+      "env"
+    ]);
+    const rawCmd = text(path, entry.command, `verifiers[${i}].command`);
+    const command = expandCommandOrPath(path, rawCmd, vars, env);
+    const name = entry.name === undefined ? rawCmd.split(/[/\\]/).pop() ?? "external" : text(path, entry.name, `verifiers[${i}].name`);
+    const args = entry.args === undefined ? undefined : Array.isArray(entry.args) ? entry.args.map((a, j) => text(path, a, `verifiers[${i}].args[${j}]`)) : (() => {
+      throw invalid2(path, `verifiers[${i}].args must be an array`);
+    })();
+    const kinds = entry.kinds === undefined ? undefined : Array.isArray(entry.kinds) ? entry.kinds.map((k, j) => text(path, k, `verifiers[${i}].kinds[${j}]`)) : (() => {
+      throw invalid2(path, `verifiers[${i}].kinds must be an array`);
+    })();
+    const customEnv = entry.env === undefined ? undefined : Object.fromEntries(Object.entries(record(path, entry.env, `verifiers[${i}].env`)).map(([k, v]) => [
+      k,
+      text(path, v, `verifiers[${i}].env.${k}`)
+    ]));
+    verifiers.push({ name, command, args, kinds, env: customEnv });
+  }
   return {
     path,
     found: true,
@@ -5896,7 +7783,8 @@ function loadConfig(env = process.env) {
       fonts,
       tokens: tokens2(path, theme.tokens, "theme.tokens"),
       dark: tokens2(path, theme.dark, "theme.dark")
-    }
+    },
+    verifiers
   };
 }
 function themeStylesheet(config, defaultThemeFile, env = process.env) {
@@ -5938,6 +7826,12 @@ function expandPath(file, value, vars, env) {
   });
   return resolve(dirname2(file), expanded);
 }
+function expandCommandOrPath(file, value, vars, env) {
+  if (value.startsWith(".") || value.startsWith("~") || value.startsWith("/") || value.includes("/") || value.includes("\\") || value.includes("${")) {
+    return expandPath(file, value, vars, env);
+  }
+  return value;
+}
 function tokens2(file, value, at) {
   const out = {};
   for (const [key, v] of Object.entries(record(file, value ?? {}, at))) {
@@ -5977,6 +7871,10 @@ function invalid2(file, message) {
     hint: "fix the file, or unset YOJANA_CONFIG to use the defaults"
   });
 }
+
+// cli/src/serve.ts
+import { existsSync as existsSync8 } from "fs";
+import { join as join8 } from "path";
 
 // node_modules/.bun/@cntxt-labs+patra-serve@..+vendor+patra+cntxt-labs-patra-serve-0.0.0.tgz/node_modules/@cntxt-labs/patra-serve/src/runtime.ts
 var RUNTIME_SCRIPT = String.raw`
@@ -6537,17 +8435,17 @@ ${lines}`)}</pre>`, 500);
     stop: () => server.stop(true)
   };
 }
-// node_modules/.bun/@cntxt-labs+patra-templates@..+vendor+patra+cntxt-labs-patra-templates-0.0.0.tgz/node_modules/@cntxt-labs/patra-templates/index.ts
-import { join as join8 } from "path";
-function templateDir(name) {
-  return join8(import.meta.dir, name);
-}
-
 // cli/src/serve.ts
+function templateDir(name) {
+  const bundled = join8(import.meta.dir, name);
+  if (existsSync8(bundled))
+    return bundled;
+  return join8(import.meta.dir, "..", "..", "templates", name);
+}
 function reviewTemplate() {
   const loaded = loadTemplate(templateDir(REVIEW_TEMPLATE));
   if (!loaded.ok) {
-    throw new YojanaError("TEMPLATE_INVALID", `patra's ${REVIEW_TEMPLATE} template did not load: ${loaded.problems.map((p) => `${p.file} ${p.message}`).join("; ")}`);
+    throw new YojanaError("TEMPLATE_INVALID", `yojana's ${REVIEW_TEMPLATE} template did not load: ${loaded.problems.map((p) => `${p.file} ${p.message}`).join("; ")}`);
   }
   return loaded.template;
 }
@@ -6612,6 +8510,9 @@ Usage:
   yojana import <file> --id <plan-id>       start a plan from an existing Markdown roadmap
                 [--prefix <bead-prefix>] [--out <path>] [--force]
   yojana check [plan] [--strict]            verify plan claims against the code
+  yojana actions sync [plan] [--dry-run]    create beads for unlinked actions and write ids back
+  yojana rules propose [plan] [req] [--dry-run]
+                                            propose realized requirements to medha as rules
   yojana config                             the settings in effect from YOJANA_CONFIG
   yojana --version
 
@@ -6668,6 +8569,7 @@ function parseFlags(argv) {
     final: false,
     finalize: undefined,
     decline: undefined,
+    dryRun: false,
     positional: []
   };
   for (let i = 0;i < argv.length; i++) {
@@ -6730,6 +8632,8 @@ function parseFlags(argv) {
       flags.strict = true;
     else if (arg === "--check")
       flags.runCheck = true;
+    else if (arg === "--dry-run")
+      flags.dryRun = true;
     else if (arg === "--stale-days") {
       const days = Number(value());
       if (!Number.isInteger(days) || days < 0) {
@@ -6825,7 +8729,8 @@ function runIngest(flags, write) {
       files: loadPlanFiles(flags.root, ws.plansDir),
       actor: actor(),
       trustFile: flags.trustFile,
-      agent: isAgent()
+      agent: isAgent(),
+      verifiers: verifiers(flags.root)
     });
     emit(flags, write, report, describeIngest(report));
     return report.files.some((f) => f.outcome === "refused" || f.outcome === "invalid") ? 1 : 0;
@@ -6946,8 +8851,8 @@ function describeCheck(report) {
     if (plan.results.length === 0)
       lines.push("  no claims");
     for (const r of plan.results) {
-      const expectation = r.claim.expect ? "" : " (expect none)";
-      lines.push(`  ${r.requirement}  ${r.outcome}  ${r.claim.kind} ${r.claim.expression}${expectation}`);
+      const target = r.action === undefined ? r.requirement : `${r.requirement} ${r.action}`;
+      lines.push(`  ${target}  ${r.outcome}  ${describeClaim(r.claim)}`);
       lines.push(`      ${r.evidence}`);
     }
   }
@@ -6957,20 +8862,36 @@ function describeCheck(report) {
 `;
 }
 function verifiers(root) {
-  return [
+  const cfg = loadConfig();
+  const list = [
     new PathVerifier(root),
     new TextVerifier(root),
-    new AnvesaVerifier(spawnAnvesa(process.env.ANVESA_BIN ?? "anvesa", root))
+    new AnvesaVerifier(spawnAnvesa(process.env.ANVESA_BIN ?? "anvesa", root)),
+    new MedhaVerifier(spawnMedha(process.env.MEDHA_BIN ?? "medha", root))
   ];
+  for (const v of cfg.verifiers) {
+    list.push(new ExternalVerifier({
+      name: v.name,
+      command: v.command,
+      args: v.args,
+      kinds: v.kinds,
+      cwd: root,
+      env: v.env
+    }));
+  }
+  return list;
 }
 function runCheck(flags, write) {
   const [planId] = flags.positional;
   return withWorkspace(flags, async (ws) => {
     const report = await check({ store: ws.store, verifiers: verifiers(flags.root), planId });
     emit(flags, write, report, describeCheck(report));
-    if (report.violated > 0)
+    const deterministicResults = report.plans.flatMap((p) => p.results).filter((r) => r.deterministic !== false);
+    const deterministicViolated = deterministicResults.filter((r) => r.outcome === "violated").length;
+    const deterministicUnverifiable = deterministicResults.filter((r) => r.outcome === "unverifiable").length;
+    if (deterministicViolated > 0)
       return 1;
-    return flags.strict && report.unverifiable > 0 ? 1 : 0;
+    return flags.strict && deterministicUnverifiable > 0 ? 1 : 0;
   });
 }
 function runComment(flags, write) {
@@ -7336,6 +9257,97 @@ function runSkill(flags, write) {
 `);
   return 0;
 }
+function describeActionsSync(report) {
+  if (report.files.length === 0)
+    return `all actions already have beads
+`;
+  const lines = [];
+  for (const file of report.files) {
+    lines.push(`${file.planId}  ${file.source}`);
+    for (const a of file.actions) {
+      const parent = a.parent === undefined ? "" : ` (parent ${a.parent})`;
+      const action = report.dryRun ? `would create "${a.title}"` : `created ${a.bead}`;
+      lines.push(`  ${a.requirement} ${a.action}: ${action}${parent}`);
+    }
+  }
+  const total = report.files.reduce((n, f) => n + f.actions.length, 0);
+  lines.push("", report.dryRun ? `dry run: would create ${plural2(total, "bead")}; rerun without --dry-run to create` : `created ${plural2(total, "bead")} and updated plan files (run yojana ingest to record)`);
+  return `${lines.join(`
+`)}
+`;
+}
+function runActionsSync(flags, write) {
+  const [, planId] = flags.positional;
+  return withWorkspace(flags, async (ws) => {
+    const wl = worklink(flags.root);
+    const report = await syncActions({
+      parser: ws.parser,
+      worklink: wl,
+      files: loadPlanFiles(flags.root, ws.plansDir),
+      writePlan: (source, text) => writeFileSync3(join9(flags.root, source), text),
+      dryRun: flags.dryRun,
+      planId
+    });
+    emit(flags, write, report, describeActionsSync(report));
+    return 0;
+  });
+}
+function describeProposeRules(report, dryRun) {
+  const lines = [];
+  if (report.proposed.length === 0) {
+    lines.push("no realized requirements with holding claims to propose as rules");
+  } else {
+    lines.push(dryRun ? `candidate rules to propose to medha (${plural2(report.proposed.length, "rule")}, dry run):` : `proposed ${plural2(report.proposed.length, "rule")} to medha:`);
+    for (const entry of report.proposed) {
+      const target = entry.actionId !== undefined ? `${entry.requirementId}#${entry.actionId}` : entry.requirementId;
+      if (entry.result !== undefined) {
+        if (entry.result.ok) {
+          lines.push(`  \u2713 ${entry.proposal.id} (${target}): proposed on probation`);
+        } else {
+          lines.push(`  \u2717 ${entry.proposal.id} (${target}): ${entry.result.error}`);
+        }
+      } else {
+        lines.push(`  - ${entry.proposal.id} (${target}): ${entry.proposal.text?.split(`
+`)[0] ?? ""}`);
+      }
+    }
+  }
+  if (report.skipped.length > 0) {
+    lines.push("", `skipped ${plural2(report.skipped.length, "requirement")}:`);
+    for (const skip of report.skipped) {
+      lines.push(`  ${skip.planId}#${skip.requirementId}: ${skip.reason}`);
+    }
+  }
+  return `${lines.join(`
+`)}
+`;
+}
+function runRulesPropose(flags, write) {
+  const [, planId, reqId] = flags.positional;
+  return withWorkspace(flags, async (ws) => {
+    const checks = await check({
+      store: ws.store,
+      verifiers: verifiers(flags.root),
+      planId
+    });
+    const wl = worklink(flags.root);
+    const medhaBin = process.env.MEDHA_BIN ?? "medha";
+    const ruleSink = new MedhaRuleSink(spawnMedha(medhaBin, flags.root));
+    const report = await proposeRules({
+      store: ws.store,
+      checkReport: checks,
+      ruleSink,
+      worklink: wl,
+      planId,
+      requirementId: reqId,
+      actor: actor(),
+      dryRun: flags.dryRun
+    });
+    emit(flags, write, report, describeProposeRules(report, flags.dryRun));
+    const anyFailed = report.proposed.some((p) => p.result?.ok === false);
+    return anyFailed ? 1 : 0;
+  });
+}
 var STARTER_PLAN = `---
 id: plan/getting-started
 title: Getting started with yojana
@@ -7382,12 +9394,12 @@ function runImport(flags, write) {
     throw new YojanaError("CLI_USAGE", "usage: yojana import <file> --id <plan-id>");
   }
   const from = resolve2(flags.root, file);
-  if (!existsSync8(from))
+  if (!existsSync9(from))
     throw new YojanaError("FILE_NOT_FOUND", `cannot read ${file}`);
   const name = flags.id.split("/").at(-1) ?? flags.id;
   const out = resolve2(flags.root, flags.out ?? join9(flags.plans ?? "plans", `${name}.md`));
   const outSource = toSource(flags.root, out);
-  if (existsSync8(out) && !flags.force) {
+  if (existsSync9(out) && !flags.force) {
     throw new YojanaError("FILE_EXISTS", `${outSource} already exists`, {
       hint: "choose another --out, or pass --force to replace it"
     });
@@ -7509,10 +9521,16 @@ function describeStatus(report, checks) {
       lines.push(`  claims     ${n("holds")} hold \xB7 ${n("violated")} violated \xB7 ${n("unverifiable")} could not be checked${violated.length > 0 ? `  (${[...new Set(violated)].join(", ")})` : ""}`);
     }
     for (const a of plan.alignment) {
-      if (a.mismatch === undefined)
-        continue;
-      const items = a.items.map((i) => `${i.id} ${i.state}`).join(", ");
-      lines.push(a.mismatch === "claims-hold-work-open" ? `  close?     ${a.requirement}: ${a.holds === 1 ? "its claim holds" : `all ${a.holds} claims hold`}, but ${items}` : `  reopen?    ${a.requirement}: ${plural2(a.violated, "claim")} violated, but ${items}`);
+      if (a.mismatch !== undefined) {
+        const items = a.items.map((i) => `${i.id} ${i.state}`).join(", ");
+        lines.push(a.mismatch === "claims-hold-work-open" ? `  close?     ${a.requirement}: ${a.holds === 1 ? "its claim holds" : `all ${a.holds} claims hold`}, but ${items}` : `  reopen?    ${a.requirement}: ${plural2(a.violated, "claim")} violated, but ${items}`);
+      }
+      for (const act of a.actions ?? []) {
+        if (act.mismatch !== undefined) {
+          const items = act.items.map((i) => `${i.id} ${i.state}`).join(", ");
+          lines.push(act.mismatch === "claims-hold-work-open" ? `  close?     ${a.requirement} ${act.action}: ${act.holds === 1 ? "its claim holds" : `all ${act.holds} claims hold`}, but ${items}` : `  reopen?    ${a.requirement} ${act.action}: ${plural2(act.violated, "claim")} violated, but ${items}`);
+        }
+      }
     }
   }
   for (const u of report.untracked) {
@@ -7624,6 +9642,12 @@ async function run(argv, write) {
       return await runReview(flags(), write);
     if (command === "config")
       return runConfig(flags(), write);
+    if (command === "actions" && rest[0] === "sync")
+      return await runActionsSync(flags(), write);
+    if (command === "rules" && rest[0] === "propose")
+      return await runRulesPropose(flags(), write);
+    if (command === "propose-rules")
+      return await runRulesPropose(flags(), write);
   } catch (error) {
     if (error instanceof YojanaError) {
       const { code, message, hint } = error;

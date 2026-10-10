@@ -17,6 +17,6 @@
   "license": "MIT",
   "devDependencies": {
     "@cntxt-labs/patra-core": "file:../vendor/patra/cntxt-labs-patra-core-0.0.0.tgz",
-    "@cntxt-labs/patra-templates": "file:../vendor/patra/cntxt-labs-patra-templates-0.0.0.tgz"
+    "@cntxt-labs/patra-themes": "file:../vendor/patra/cntxt-labs-patra-themes-0.0.0.tgz"
   }
 }

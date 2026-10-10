@@ -1,6 +1,6 @@
-# review-document
+# plan-review
 
-The first template: a long document with an outline and a review rail. Planned files:
+The review surface for yojana plans: a long document with an outline and a review rail. Planned files:
 
 - `template.json` — manifest (parts, actions, tokens, schema)
 - `page.html` — top bar, outline, document, rail

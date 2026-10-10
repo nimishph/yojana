@@ -1,0 +1,6 @@
+<div class="callout {{intent}}" data-patra-part="callout" data-patra-key="{{id}}">
+  <p class="callout-text">{{text}}</p>
+  {{#notes.length}}<ul class="callout-notes">{{#notes}}<li class="{{intent}}">{{label}}</li>{{/notes}}</ul>{{/notes.length}}
+  {{#buttons.length}}<div class="actions live-only">{{#buttons}}<button type="button" class="{{#primary}}primary{{/primary}}" data-patra-action="{{action}}" data-patra-item="{{item}}" data-patra-decision="{{decision}}">{{label}}</button>{{/buttons}}</div>{{/buttons.length}}
+  <div class="slot" data-patra-slot></div>
+</div>

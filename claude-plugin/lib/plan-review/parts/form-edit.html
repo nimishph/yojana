@@ -1,0 +1,6 @@
+<form class="inline" data-patra-form="edit">
+  <label><span class="label">Title</span><input name="title" value="{{values.title}}" required></label>
+  <label><span class="label">Text</span><textarea name="text" rows="8">{{values.text}}</textarea></label>
+  {{#error}}<p class="error" role="alert">{{error}}</p>{{/error}}
+  <div class="actions"><button type="submit" class="primary">Save</button><button type="button" data-patra-cancel>Cancel</button></div>
+</form>

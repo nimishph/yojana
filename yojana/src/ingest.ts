@@ -1,12 +1,17 @@
 import {
   type BasePort,
+  type Claim,
+  type ClaimKindDescriptor,
   foldLog,
+  isCompositeClaimKind,
   type ParseIssue,
   type ParserPort,
   type PlanStatus,
   type RequirementId,
   type RevisionHash,
   type StorePort,
+  type VerifierPort,
+  validateClaimSchema,
   type YojanaEventInput,
 } from '@cntxt-labs/yojana-core';
 
@@ -55,6 +60,8 @@ export interface IngestOptions {
   readonly dryRun?: boolean | undefined;
   /** The actor is an agent: a status edit becomes a proposal instead of a change of status. */
   readonly agent?: boolean | undefined;
+  /** Verifiers to validate claims against during ingest. Unknown kinds or schema violations fail ingest. */
+  readonly verifiers?: readonly VerifierPort[] | undefined;
 }
 
 export type Movement = 'same' | 'edited' | 'behind' | 'conflict';
@@ -138,6 +145,54 @@ export async function ingest(options: IngestOptions): Promise<IngestReport> {
       continue;
     }
     seenPlans.set(plan.id, file.source);
+
+    if (options.verifiers !== undefined && options.verifiers.length > 0) {
+      const descriptorsByKind = new Map<string, ClaimKindDescriptor>();
+      for (const v of options.verifiers) {
+        if (typeof v.describe === 'function') {
+          const desc = await v.describe();
+          for (const k of desc.kinds) descriptorsByKind.set(k.kind, k);
+        } else {
+          for (const k of v.kinds) {
+            descriptorsByKind.set(k, { kind: k, expression: true, deterministic: true });
+          }
+        }
+      }
+      const knownKinds = [...descriptorsByKind.keys()].sort().join(', ');
+      const claimIssues: ParseIssue[] = [];
+
+      for (const req of plan.requirements) {
+        for (const claim of req.claims) {
+          claimIssues.push(
+            ...validateClaimRecursive(
+              claim,
+              `requirement ${req.id}`,
+              file.source,
+              descriptorsByKind,
+              knownKinds,
+            ),
+          );
+        }
+        for (const act of req.actions ?? []) {
+          for (const claim of act.claims ?? []) {
+            claimIssues.push(
+              ...validateClaimRecursive(
+                claim,
+                `action ${act.id}`,
+                file.source,
+                descriptorsByKind,
+                knownKinds,
+              ),
+            );
+          }
+        }
+      }
+
+      if (claimIssues.length > 0) {
+        reports.push(invalid(file.source, plan.id, claimIssues));
+        continue;
+      }
+    }
 
     // Fold fresh for each file: an earlier file in this run may have appended.
     const state = foldLog(await store.events());
@@ -314,4 +369,68 @@ function invalid(
     workItemsChanged: false,
     appended: 0,
   };
+}
+
+function validateClaimRecursive(
+  claim: Claim,
+  context: string,
+  source: string,
+  descriptorsByKind: ReadonlyMap<string, ClaimKindDescriptor>,
+  knownKinds: string,
+): ParseIssue[] {
+  const issues: ParseIssue[] = [];
+  if (isCompositeClaimKind(claim.kind)) {
+    const children = claim.claims ?? [];
+    if (children.length === 0) {
+      issues.push({
+        source,
+        line: undefined,
+        code: 'INVALID_CLAIM',
+        message: `composite claim "${claim.kind}" requires at least one child claim in ${context}`,
+      });
+      return issues;
+    }
+    if (claim.kind === 'not' && children.length > 1) {
+      issues.push({
+        source,
+        line: undefined,
+        code: 'INVALID_CLAIM',
+        message: `composite claim "not" requires a single child claim in ${context}`,
+      });
+      return issues;
+    }
+    for (const child of children) {
+      issues.push(
+        ...validateClaimRecursive(
+          child,
+          `composite claim "${claim.kind}" in ${context}`,
+          source,
+          descriptorsByKind,
+          knownKinds,
+        ),
+      );
+    }
+    return issues;
+  }
+
+  const desc = descriptorsByKind.get(claim.kind);
+  if (desc === undefined) {
+    issues.push({
+      source,
+      line: undefined,
+      code: 'UNKNOWN_CLAIM_KIND',
+      message: `unknown claim kind "${claim.kind}" in ${context}; known kinds: ${knownKinds}`,
+    });
+  } else {
+    const errs = validateClaimSchema(claim, desc);
+    for (const err of errs) {
+      issues.push({
+        source,
+        line: undefined,
+        code: err.code,
+        message: `${err.message} in ${context}`,
+      });
+    }
+  }
+  return issues;
 }

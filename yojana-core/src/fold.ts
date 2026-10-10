@@ -1,6 +1,53 @@
 import type { WorkDecision, YojanaEvent } from './events.ts';
-import type { Annotation, Change, Delta, PlanStatus, Requirement } from './model.ts';
+import type { Annotation, Change, Claim, Delta, PlanStatus, Requirement } from './model.ts';
 import type { RequirementId, RevisionHash } from './revision.ts';
+
+/**
+ * Normalizes a claim from event storage, ensuring expect is present (defaulting to true)
+ * and backward compatibility with older events that stored only {kind, expression}.
+ */
+export function normalizeClaim(raw: unknown): Claim {
+  if (typeof raw !== 'object' || raw === null) {
+    return { kind: 'unknown', expect: true };
+  }
+  const r = raw as Record<string, unknown>;
+  if (typeof r.kind === 'string' && r.expect !== undefined) {
+    return raw as Claim;
+  }
+  const kind = typeof r.kind === 'string' ? r.kind : 'unknown';
+  const expression = typeof r.expression === 'string' ? r.expression : undefined;
+  const expect = r.expect ?? true;
+  const params =
+    typeof r.params === 'object' && r.params !== null && !Array.isArray(r.params)
+      ? (r.params as Record<string, unknown>)
+      : undefined;
+  return {
+    kind,
+    ...(expression !== undefined ? { expression } : {}),
+    ...(params !== undefined ? { params } : {}),
+    expect: (expect as Claim['expect']) ?? true,
+  };
+}
+
+export function normalizeRequirement(requirement: Requirement): Requirement {
+  const needsClaimNorm = requirement.claims.some((c) => c.expect === undefined);
+  const needsActNorm = requirement.actions?.some((a) =>
+    a.claims?.some((c) => c.expect === undefined),
+  );
+  if (!needsClaimNorm && !needsActNorm) {
+    return requirement;
+  }
+  const claims = (requirement.claims ?? []).map(normalizeClaim);
+  const actions = requirement.actions?.map((a) => ({
+    ...a,
+    claims: a.claims?.map(normalizeClaim),
+  }));
+  return {
+    ...requirement,
+    claims,
+    ...(actions !== undefined ? { actions } : {}),
+  };
+}
 
 /**
  * Fold: the current state, rebuilt from the log. The log is the source of truth, so the fold is
@@ -196,7 +243,7 @@ function applyDelta(state: FoldState, plan: PlanState, delta: Delta, seq: number
     });
   }
   if (delta.op === 'remove') plan.heads.delete(id);
-  else plan.heads.set(id, delta.requirement);
+  else plan.heads.set(id, normalizeRequirement(delta.requirement));
 }
 
 /** Apply one event to the state, in place. Events must arrive in seq order. */

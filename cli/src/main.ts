@@ -5,6 +5,7 @@ import { pageHead, renderPage } from '@cntxt-labs/patra-core';
 import { themeFile } from '@cntxt-labs/patra-themes';
 import {
   type AbandonResult,
+  type ActionsSyncReport,
   type ArchiveResult,
   abandonChange,
   applyDecisions,
@@ -28,6 +29,8 @@ import {
   openChange,
   openWorkspace,
   type ProposalResult,
+  type ProposeRulesReport,
+  proposeRules,
   proposeStatus,
   REVIEW_TEMPLATE,
   recordDecision,
@@ -38,11 +41,21 @@ import {
   settleChangeFile,
   settleStatusLine,
   status,
+  syncActions,
   VERSION,
   type Workspace,
 } from '@cntxt-labs/yojana';
-import { foldLog, type VerifierPort, YojanaError } from '@cntxt-labs/yojana-core';
-import { AnvesaVerifier, PathVerifier, spawnAnvesa, TextVerifier } from '@cntxt-labs/yojana-verify';
+import { describeClaim, foldLog, type VerifierPort, YojanaError } from '@cntxt-labs/yojana-core';
+import {
+  AnvesaVerifier,
+  ExternalVerifier,
+  MedhaRuleSink,
+  MedhaVerifier,
+  PathVerifier,
+  spawnAnvesa,
+  spawnMedha,
+  TextVerifier,
+} from '@cntxt-labs/yojana-verify';
 import { BdWorkLink, spawnBd } from '@cntxt-labs/yojana-work';
 import SKILL from '../../claude-plugin/skills/yojana/SKILL.md' with { type: 'text' };
 import { loadConfig, themeStylesheet } from './config.ts';
@@ -82,6 +95,9 @@ Usage:
   yojana import <file> --id <plan-id>       start a plan from an existing Markdown roadmap
                 [--prefix <bead-prefix>] [--out <path>] [--force]
   yojana check [plan] [--strict]            verify plan claims against the code
+  yojana actions sync [plan] [--dry-run]    create beads for unlinked actions and write ids back
+  yojana rules propose [plan] [req] [--dry-run]
+                                            propose realized requirements to medha as rules
   yojana config                             the settings in effect from YOJANA_CONFIG
   yojana --version
 
@@ -145,6 +161,7 @@ interface Flags {
   readonly final: boolean;
   readonly finalize: string | undefined;
   readonly decline: string | undefined;
+  readonly dryRun: boolean;
   readonly positional: readonly string[];
 }
 
@@ -175,6 +192,7 @@ function parseFlags(argv: readonly string[]): Flags {
     final: false,
     finalize: undefined as string | undefined,
     decline: undefined as string | undefined,
+    dryRun: false,
     positional: [] as string[],
   };
   for (let i = 0; i < argv.length; i++) {
@@ -213,6 +231,7 @@ function parseFlags(argv: readonly string[]): Flags {
     else if (arg === '--all') flags.all = true;
     else if (arg === '--strict') flags.strict = true;
     else if (arg === '--check') flags.runCheck = true;
+    else if (arg === '--dry-run') flags.dryRun = true;
     else if (arg === '--stale-days') {
       const days = Number(value());
       if (!Number.isInteger(days) || days < 0) {
@@ -352,6 +371,7 @@ function runIngest(flags: Flags, write: Write): Promise<number> {
       actor: actor(),
       trustFile: flags.trustFile,
       agent: isAgent(),
+      verifiers: verifiers(flags.root),
     });
     emit(flags, write, report, describeIngest(report));
     return report.files.some((f) => f.outcome === 'refused' || f.outcome === 'invalid') ? 1 : 0;
@@ -482,10 +502,8 @@ function describeCheck(report: CheckReport): string {
     lines.push(plan.planId);
     if (plan.results.length === 0) lines.push('  no claims');
     for (const r of plan.results) {
-      const expectation = r.claim.expect ? '' : ' (expect none)';
-      lines.push(
-        `  ${r.requirement}  ${r.outcome}  ${r.claim.kind} ${r.claim.expression}${expectation}`,
-      );
+      const target = r.action === undefined ? r.requirement : `${r.requirement} ${r.action}`;
+      lines.push(`  ${target}  ${r.outcome}  ${describeClaim(r.claim)}`);
       lines.push(`      ${r.evidence}`);
     }
   }
@@ -497,11 +515,26 @@ function describeCheck(report: CheckReport): string {
 }
 
 function verifiers(root: string): VerifierPort[] {
-  return [
+  const cfg = loadConfig();
+  const list: VerifierPort[] = [
     new PathVerifier(root),
     new TextVerifier(root),
     new AnvesaVerifier(spawnAnvesa(process.env.ANVESA_BIN ?? 'anvesa', root)),
+    new MedhaVerifier(spawnMedha(process.env.MEDHA_BIN ?? 'medha', root)),
   ];
+  for (const v of cfg.verifiers) {
+    list.push(
+      new ExternalVerifier({
+        name: v.name,
+        command: v.command,
+        args: v.args,
+        kinds: v.kinds,
+        cwd: root,
+        env: v.env,
+      }),
+    );
+  }
+  return list;
 }
 
 function runCheck(flags: Flags, write: Write): Promise<number> {
@@ -509,8 +542,17 @@ function runCheck(flags: Flags, write: Write): Promise<number> {
   return withWorkspace(flags, async (ws) => {
     const report = await check({ store: ws.store, verifiers: verifiers(flags.root), planId });
     emit(flags, write, report, describeCheck(report));
-    if (report.violated > 0) return 1;
-    return flags.strict && report.unverifiable > 0 ? 1 : 0;
+    const deterministicResults = report.plans
+      .flatMap((p) => p.results)
+      .filter((r) => r.deterministic !== false);
+    const deterministicViolated = deterministicResults.filter(
+      (r) => r.outcome === 'violated',
+    ).length;
+    const deterministicUnverifiable = deterministicResults.filter(
+      (r) => r.outcome === 'unverifiable',
+    ).length;
+    if (deterministicViolated > 0) return 1;
+    return flags.strict && deterministicUnverifiable > 0 ? 1 : 0;
   });
 }
 
@@ -999,6 +1041,111 @@ function runSkill(flags: Flags, write: Write): number {
   return 0;
 }
 
+// actions sync
+
+function describeActionsSync(report: ActionsSyncReport): string {
+  if (report.files.length === 0) return 'all actions already have beads\n';
+  const lines: string[] = [];
+  for (const file of report.files) {
+    lines.push(`${file.planId}  ${file.source}`);
+    for (const a of file.actions) {
+      const parent = a.parent === undefined ? '' : ` (parent ${a.parent})`;
+      const action = report.dryRun ? `would create "${a.title}"` : `created ${a.bead}`;
+      lines.push(`  ${a.requirement} ${a.action}: ${action}${parent}`);
+    }
+  }
+  const total = report.files.reduce((n, f) => n + f.actions.length, 0);
+  lines.push(
+    '',
+    report.dryRun
+      ? `dry run: would create ${plural(total, 'bead')}; rerun without --dry-run to create`
+      : `created ${plural(total, 'bead')} and updated plan files (run yojana ingest to record)`,
+  );
+  return `${lines.join('\n')}\n`;
+}
+
+function runActionsSync(flags: Flags, write: Write): Promise<number> {
+  const [, planId] = flags.positional;
+  return withWorkspace(flags, async (ws) => {
+    const wl = worklink(flags.root);
+    const report = await syncActions({
+      parser: ws.parser,
+      worklink: wl,
+      files: loadPlanFiles(flags.root, ws.plansDir),
+      writePlan: (source, text) => writeFileSync(join(flags.root, source), text),
+      dryRun: flags.dryRun,
+      planId,
+    });
+    emit(flags, write, report, describeActionsSync(report));
+    return 0;
+  });
+}
+
+function describeProposeRules(report: ProposeRulesReport, dryRun: boolean): string {
+  const lines: string[] = [];
+  if (report.proposed.length === 0) {
+    lines.push('no realized requirements with holding claims to propose as rules');
+  } else {
+    lines.push(
+      dryRun
+        ? `candidate rules to propose to medha (${plural(report.proposed.length, 'rule')}, dry run):`
+        : `proposed ${plural(report.proposed.length, 'rule')} to medha:`,
+    );
+    for (const entry of report.proposed) {
+      const target =
+        entry.actionId !== undefined
+          ? `${entry.requirementId}#${entry.actionId}`
+          : entry.requirementId;
+      if (entry.result !== undefined) {
+        if (entry.result.ok) {
+          lines.push(`  ✓ ${entry.proposal.id} (${target}): proposed on probation`);
+        } else {
+          lines.push(`  ✗ ${entry.proposal.id} (${target}): ${entry.result.error}`);
+        }
+      } else {
+        lines.push(
+          `  - ${entry.proposal.id} (${target}): ${entry.proposal.text?.split('\n')[0] ?? ''}`,
+        );
+      }
+    }
+  }
+
+  if (report.skipped.length > 0) {
+    lines.push('', `skipped ${plural(report.skipped.length, 'requirement')}:`);
+    for (const skip of report.skipped) {
+      lines.push(`  ${skip.planId}#${skip.requirementId}: ${skip.reason}`);
+    }
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+function runRulesPropose(flags: Flags, write: Write): Promise<number> {
+  const [, planId, reqId] = flags.positional;
+  return withWorkspace(flags, async (ws) => {
+    const checks = await check({
+      store: ws.store,
+      verifiers: verifiers(flags.root),
+      planId,
+    });
+    const wl = worklink(flags.root);
+    const medhaBin = process.env.MEDHA_BIN ?? 'medha';
+    const ruleSink = new MedhaRuleSink(spawnMedha(medhaBin, flags.root));
+    const report = await proposeRules({
+      store: ws.store,
+      checkReport: checks,
+      ruleSink,
+      worklink: wl,
+      planId,
+      requirementId: reqId,
+      actor: actor(),
+      dryRun: flags.dryRun,
+    });
+    emit(flags, write, report, describeProposeRules(report, flags.dryRun));
+    const anyFailed = report.proposed.some((p) => p.result?.ok === false);
+    return anyFailed ? 1 : 0;
+  });
+}
+
 const STARTER_PLAN = `---
 id: plan/getting-started
 title: Getting started with yojana
@@ -1209,13 +1356,24 @@ function describeStatus(report: StatusReport, checks: CheckReport | undefined): 
       );
     }
     for (const a of plan.alignment) {
-      if (a.mismatch === undefined) continue;
-      const items = a.items.map((i) => `${i.id} ${i.state}`).join(', ');
-      lines.push(
-        a.mismatch === 'claims-hold-work-open'
-          ? `  close?     ${a.requirement}: ${a.holds === 1 ? 'its claim holds' : `all ${a.holds} claims hold`}, but ${items}`
-          : `  reopen?    ${a.requirement}: ${plural(a.violated, 'claim')} violated, but ${items}`,
-      );
+      if (a.mismatch !== undefined) {
+        const items = a.items.map((i) => `${i.id} ${i.state}`).join(', ');
+        lines.push(
+          a.mismatch === 'claims-hold-work-open'
+            ? `  close?     ${a.requirement}: ${a.holds === 1 ? 'its claim holds' : `all ${a.holds} claims hold`}, but ${items}`
+            : `  reopen?    ${a.requirement}: ${plural(a.violated, 'claim')} violated, but ${items}`,
+        );
+      }
+      for (const act of a.actions ?? []) {
+        if (act.mismatch !== undefined) {
+          const items = act.items.map((i) => `${i.id} ${i.state}`).join(', ');
+          lines.push(
+            act.mismatch === 'claims-hold-work-open'
+              ? `  close?     ${a.requirement} ${act.action}: ${act.holds === 1 ? 'its claim holds' : `all ${act.holds} claims hold`}, but ${items}`
+              : `  reopen?    ${a.requirement} ${act.action}: ${plural(act.violated, 'claim')} violated, but ${items}`,
+          );
+        }
+      }
     }
   }
   for (const u of report.untracked) {
@@ -1314,6 +1472,9 @@ export async function run(argv: readonly string[], write: Write): Promise<number
     if (command === 'remove-comment') return await runRemoveComment(flags(), write);
     if (command === 'review') return await runReview(flags(), write);
     if (command === 'config') return runConfig(flags(), write);
+    if (command === 'actions' && rest[0] === 'sync') return await runActionsSync(flags(), write);
+    if (command === 'rules' && rest[0] === 'propose') return await runRulesPropose(flags(), write);
+    if (command === 'propose-rules') return await runRulesPropose(flags(), write);
   } catch (error) {
     if (error instanceof YojanaError) {
       const { code, message, hint } = error;

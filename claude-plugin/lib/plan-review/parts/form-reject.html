@@ -1,0 +1,5 @@
+<form class="inline" data-patra-form="reject">
+  <label><span class="label">Why reject it?</span><input name="reason" value="{{values.reason}}" required></label>
+  {{#error}}<p class="error" role="alert">{{error}}</p>{{/error}}
+  <div class="actions"><button type="submit" class="primary">Reject</button><button type="button" data-patra-cancel>Cancel</button></div>
+</form>

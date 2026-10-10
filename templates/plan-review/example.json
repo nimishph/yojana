@@ -135,6 +135,36 @@
           }
         ]
       },
+      "actions": [
+        {
+          "id": "act-primer-cmd",
+          "text": "Add primer CLI command",
+          "done": true,
+          "items": [
+            {
+              "label": "anv-35b.1 · closed",
+              "intent": "success"
+            }
+          ],
+          "claims": [
+            {
+              "label": "path cli/src/primer.ts · 1 match",
+              "intent": "success"
+            }
+          ]
+        },
+        {
+          "id": "act-primer-test",
+          "text": "Add anti-drift test",
+          "done": false,
+          "items": [
+            {
+              "label": "anv-35b.2 · open"
+            }
+          ],
+          "note": "close?"
+        }
+      ],
       "evidence": [
         {
           "label": "path cli/src/primer.ts · 1 match",

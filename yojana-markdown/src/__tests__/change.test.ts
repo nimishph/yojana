@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { type ChangeParseResult, YojanaError } from '@cntxt-labs/yojana-core';
 import { parseChange } from '../change.ts';
 import { parsePlan } from '../parse.ts';
+import { renderChange } from '../render.ts';
 
 const codes = (result: ChangeParseResult) =>
   result.ok ? [] : result.issues.map((i) => `${i.code}@${i.line}`);
@@ -62,5 +63,37 @@ describe('parseChange', () => {
   test('change markers are not allowed in a plan', () => {
     const result = parsePlan('p.md', '---\nid: plan/p\n---\n## ADDED Requirement: a {#a}\n');
     expect(result.ok ? [] : result.issues.map((i) => i.code)).toEqual(['CHANGE_MARKER_IN_PLAN']);
+  });
+
+  test('parses and renders changes with actions under requirements', () => {
+    const text = change(
+      [
+        '## MODIFIED Requirement: plugin loads {#req-a}',
+        'Prefer a global anvesa.',
+        '',
+        '### Actions',
+        '- Add npx launcher {#act-npx bead=anv-1}',
+        '```yojana:claim',
+        'kind: path',
+        'expression: bin/npx',
+        '```',
+      ].join('\n'),
+    );
+    const result = parseChange('changes/tweak.md', text);
+    if (!result.ok) throw new YojanaError('TEST_FIXTURE', JSON.stringify(result.issues));
+    const delta = result.change.deltas[0];
+    expect(delta?.op).toBe('modify');
+    if (delta?.op !== 'modify') return;
+    expect(delta.requirement.actions).toHaveLength(1);
+    expect(delta.requirement.actions?.[0]?.id).toBe('act-npx');
+    expect(delta.requirement.actions?.[0]?.claims).toEqual([
+      { kind: 'path', expression: 'bin/npx', expect: true },
+    ]);
+    expect(delta.requirement.actionsRevision).toBeDefined();
+
+    const rendered = renderChange(result.change, 'Why this change');
+    expect(rendered).toContain('### Actions');
+    expect(rendered).toContain('- Add npx launcher {#act-npx bead=anv-1}');
+    expect(rendered).toContain('expression: bin/npx');
   });
 });

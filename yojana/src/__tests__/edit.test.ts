@@ -130,6 +130,52 @@ describe('editRequirement', () => {
     expect(await clean.edit({ text: 'Alpha as planned.' })).toMatchObject({ code: 'UNCHANGED' });
     expect(clean.files.get(SOURCE)).toBe(PLAN);
   });
+
+  test('editing a requirement preserves its actions and action links', async () => {
+    const store = new MemoryStore();
+    await store.open();
+    const bases = new MemoryBaseStore();
+    const planWithActs = PLAN.replace(
+      'expression: a.txt\n```',
+      'expression: a.txt\n```\n\n### Actions\n\n- Step 1 {#act-1 bead=b-1}',
+    );
+    const files = new Map<string, string>([[SOURCE, planWithActs]]);
+    const planFiles = (): PlanFile[] =>
+      [...files]
+        .filter(([s]) => s.startsWith('plans/'))
+        .map(([source, text]) => ({ source, text }));
+    await ingest({ store, parser, bases, files: planFiles(), actor: 'me' });
+
+    const r = foldLog(await store.events())
+      .plans.get('plan/p')
+      ?.heads.get('a');
+    if (!r) throw new YojanaError('TEST_FIXTURE', 'no a');
+    expect(r.actions).toHaveLength(1);
+
+    const result = await editRequirement({
+      store,
+      parser,
+      bases,
+      files: planFiles(),
+      planId: 'plan/p',
+      requirementId: 'a',
+      expectedRevision: r.revision,
+      title: r.title,
+      text: 'Alpha text modified.',
+      actor: 'me',
+      writePlan: (s, t) => files.set(s, t),
+    });
+    expect(result.ok).toBe(true);
+
+    const head = foldLog(await store.events())
+      .plans.get('plan/p')
+      ?.heads.get('a');
+    expect(head?.text).toBe('Alpha text modified.');
+    expect(head?.actions).toHaveLength(1);
+    expect(head?.actions?.[0]?.id).toBe('act-1');
+    expect(files.get(SOURCE)).toContain('### Actions');
+    expect(files.get(SOURCE)).toContain('- Step 1 {#act-1 bead=b-1}');
+  });
 });
 
 describe('suggestEdit', () => {

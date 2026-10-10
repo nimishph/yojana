@@ -1,4 +1,8 @@
-import type { RequirementId, RevisionHash } from './revision.ts';
+import type { Claim } from './predicate.ts';
+import type { ActionId, RequirementId, RevisionHash } from './revision.ts';
+
+export type { Claim, ClaimPredicate, ScalarPredicate } from './predicate.ts';
+export type { ActionId } from './revision.ts';
 
 /** Lifecycle of a plan. Every transition is an event with a reason. */
 export type PlanStatus =
@@ -10,14 +14,14 @@ export type PlanStatus =
   | 'abandoned';
 
 /**
- * A checkable statement about the code. `kind` names the verifier that understands it
- * (`wql` and `dependents` for anvesa, `command` for a shell fallback).
+ * An action item under a requirement describing concrete work to deliver it.
+ * Bead links indicate tracker items; claims specify done-when checks.
  */
-export interface Claim {
-  readonly kind: string;
-  readonly expression: string;
-  /** true: the expression must match something; false: it must match nothing. */
-  readonly expect: boolean;
+export interface Action {
+  readonly id: ActionId;
+  readonly text: string;
+  readonly workItems?: readonly string[] | undefined;
+  readonly claims?: readonly Claim[] | undefined;
 }
 
 export interface Requirement {
@@ -26,8 +30,22 @@ export interface Requirement {
   readonly text: string;
   readonly revision: RevisionHash;
   readonly claims: readonly Claim[];
+  /** Actions that deliver this requirement; absent in logs written before actions. */
+  readonly actions?: readonly Action[] | undefined;
+  /** Revision of the actions list, separate from the requirement's revision. */
+  readonly actionsRevision?: RevisionHash | undefined;
   /** Work items (bead ids) that deliver this requirement; absent in logs written before links. */
   readonly workItems?: readonly string[] | undefined;
+}
+
+/**
+ * All work items delivering a requirement: the union of requirement-level beads
+ * and beads linked to individual actions.
+ */
+export function requirementWorkItems(requirement: Requirement): readonly string[] {
+  const reqWork = requirement.workItems ?? [];
+  const actWork = (requirement.actions ?? []).flatMap((a) => a.workItems ?? []);
+  return [...new Set([...reqWork, ...actWork])];
 }
 
 export const PLAN_STATUSES: readonly PlanStatus[] = [

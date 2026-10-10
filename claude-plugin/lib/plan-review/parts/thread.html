@@ -1,0 +1,9 @@
+<article class="card thread{{#outdated}} outdated{{/outdated}}{{#removed}} removed{{/removed}}" data-patra-part="thread" data-patra-key="{{id}}" data-patra-section="{{section}}" data-patra-mark="{{mark}}">
+  <div class="who"><b>{{author}}</b>{{#agent}}<span class="chip primary">agent</span>{{/agent}}<a href="#{{section}}">{{section}}</a>{{#mark}}<span class="pin">{{mark}}</span>{{/mark}}{{#when}}<span>{{when}}</span>{{/when}}{{#outdated}}<span class="chip warning">outdated</span>{{/outdated}}</div>
+  {{#removed}}<p class="muted">This comment was removed.</p>{{/removed}}
+  {{^removed}}{{#quote}}<blockquote>{{quote}}</blockquote>{{/quote}}
+  <p>{{body}}</p>{{/removed}}
+  {{#replies}}<div class="reply"><div class="who"><b>{{author}}</b>{{#agent}}<span class="chip primary">agent</span>{{/agent}}{{#when}}<span>{{when}}</span>{{/when}}{{#removable}}<button type="button" class="link live-only" data-patra-action="remove" data-patra-item="{{id}}">Remove</button>{{/removable}}</div><p>{{body}}</p></div>{{/replies}}
+  <div class="actions live-only"><button type="button" class="link" data-patra-action="reply">Reply</button>{{#removable}}<button type="button" class="link" data-patra-action="remove">Remove</button>{{/removable}}</div>
+  <div class="slot" data-patra-slot></div>
+</article>

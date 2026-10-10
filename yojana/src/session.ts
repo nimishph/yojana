@@ -44,7 +44,7 @@ import { loadPlanFiles, openWorkspace, settleChangeFile, type Workspace } from '
  */
 
 /** The template a session's documents are for. */
-export const REVIEW_TEMPLATE = 'review-document';
+export const REVIEW_TEMPLATE = 'plan-review';
 /** Days an open change may sit before status calls it stale. */
 const STALE_DAYS = 14;
 
