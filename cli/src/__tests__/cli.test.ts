@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { VERSION } from '@cntxt-labs/yojana';
 import { run } from '../main.ts';
 import { reviewTemplate } from '../serve.ts';
 
@@ -83,7 +84,7 @@ async function yojana(...args: string[]): Promise<{ code: number; out: string }>
 describe('yojana CLI, start to finish', () => {
   test('--version and help', async () => {
     const version = await yojana('--version');
-    expect(version).toEqual({ code: 0, out: '0.1.0\n' });
+    expect(version).toEqual({ code: 0, out: `${VERSION}\n` });
     const help = await yojana('--help');
     expect(help.code).toBe(0);
     expect(help.out).toContain('Exit codes:');

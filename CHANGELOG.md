@@ -1,6 +1,28 @@
 # Changelog
 
 All notable changes are documented here.
+## [0.2.0] - 2026-10-11
+
+### Documentation
+
+- Bd is not part of cntxt-labs
+
+
+### Features
+
+- **cli:** Yojana primer and yojana skill install
+
+- Extensible claims, actions under requirements, and plan-review template (yoj-fcl, yoj-565, yoj-tfq)
+
+- **work:** GitHub Issues and Markdown checklist WorkLinkPort adapters (yoj-ie1)
+
+- **work:** Support owner/repo#number cross-repo issues and --repo CLI flag
+
+
+### Maintenance
+
+- Tag-triggered release that stages on npm, and a promote workflow
+
 ## [0.1.0] - 2026-10-08
 
 ### Bug Fixes
@@ -78,6 +100,8 @@ All notable changes are documented here.
 - **review:** Review --content prints the page content as JSON; patra 957ed30 (yoj-ucc)
 
 - Remove a comment, decline a requirement, and the CLI bundled into the plugin (yoj-fiq, yoj-8vg, yoj-5km)
+
+- Yojana init, npm package build, version 0.1.0, changelog
 
 
 ### Other

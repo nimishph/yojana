@@ -6477,7 +6477,7 @@ async function syncActions(options) {
 }
 
 // yojana/src/index.ts
-var VERSION = "0.1.0";
+var VERSION = "0.2.0";
 
 // yojana-verify/src/evidence.ts
 var EVIDENCE_ITEMS = 3;
